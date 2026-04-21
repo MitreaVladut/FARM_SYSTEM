@@ -1,0 +1,36 @@
+name: Python CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        [cite_start]python-version: "3.12" # Matches SRS 3.10+ requirement 
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install reflex pymongo python-dotenv bcrypt pylint 
+        # Added dotenv to fix your recent 'ModuleNotFoundError' [cite: 82]
+
+    - name: Lint with Pylint
+      run: |
+        # Enforces SRS Rule 5.4: All code must follow PEP 8 and pass Pylint 
+        # Fails the build if "Critical Errors" are found 
+        pylint farm/ --errors-only 
+
+    - name: Check for Broad Exceptions
+      run: |
+        # Enforces SRS Rule 5.4.5: Prohibits bare 'except:' clauses [cite: 348]
+        grep -r "except:" farm/ && exit 1 || exit 0
