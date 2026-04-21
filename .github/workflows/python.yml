@@ -16,7 +16,7 @@ jobs:
     - name: Set up Python 3.12
       uses: actions/setup-python@v5
       with:
-        [cite_start]python-version: "3.12" # Matches SRS 3.10+ requirement 
+        python-version: "3.12" # Matches SRS 3.10+ requirement 
 
     - name: Install dependencies
       run: |
