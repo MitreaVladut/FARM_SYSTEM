@@ -28,9 +28,9 @@ jobs:
       run: |
         # Enforces SRS Rule 5.4: All code must follow PEP 8 and pass Pylint 
         # Fails the build if "Critical Errors" are found 
-        pylint farm/ --errors-only 
+        pylint farm/farm/ --errors-only 
 
     - name: Check for Broad Exceptions
       run: |
         # Enforces SRS Rule 5.4.5: Prohibits bare 'except:' clauses [cite: 348]
-        grep -r "except:" farm/ && exit 1 || exit 0
+        grep -r "except:" farm/farm/ && exit 1 || exit 0
