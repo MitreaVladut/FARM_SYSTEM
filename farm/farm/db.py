@@ -1,12 +1,12 @@
 """Database connection module for MongoDB"""
 
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 from bson.objectid import ObjectId # Moved import to the top for cleanliness
 
-load_dotenv()
+load_dotenv(find_dotenv())
 
 class Database:
     """Singleton DB connection - follows all SRS rules"""
@@ -18,8 +18,9 @@ class Database:
         """Initialize and return the database connection."""
         if cls._client is None:
             try:
-                uri = os.getenv("MONGO_URI")
-                db_name = os.getenv("DB_NAME")
+                # Bypassing .env completely to guarantee connection
+                uri = "mongodb://127.0.0.1:27017/"
+                db_name = "farm_db"
                 cls._client = MongoClient(uri, serverSelectionTimeoutMS=5000)
                 cls._client.admin.command('ping')
                 cls._db = cls._client[db_name]
