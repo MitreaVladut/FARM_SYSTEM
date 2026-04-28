@@ -20,7 +20,7 @@ def cart_item(item, index):
                 size=20, 
                 color="#e11d48", # Red
                 cursor="pointer",
-                on_click=lambda: StoreState.remove_item(index)
+                on_click=lambda: StoreState.remove_item(index) # pylint: disable=no-value-for-parameter
             ),
             spacing="4",
             align="center",
@@ -30,6 +30,7 @@ def cart_item(item, index):
         border_bottom="1px solid #eee",
     )
 
+# pylint: disable=not-callable
 @rx.page(route="/order")
 def order_page():
     return rx.center(

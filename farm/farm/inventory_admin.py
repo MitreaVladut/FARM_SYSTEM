@@ -42,7 +42,7 @@ def inventory_row(product: dict):
                 "Toggle Status",
                 size="1",
                 # Pass the string name directly to the state method
-                on_click = InventoryState.toggle_status(product["name"]),
+                on_click=lambda: InventoryState.toggle_status(product["name"]), # pylint: disable=no-value-for-parameter
                 variant="surface",
             )
         ),

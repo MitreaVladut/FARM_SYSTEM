@@ -59,7 +59,7 @@ def order_card(order: rx.Var[Dict[str, Any]]):
             rx.divider(),
             rx.button(
                 "Update Status", 
-                on_click=lambda: StaffOrderState.change_status(order["id"].to(str), order["status"].to(str)),
+                on_click=lambda: StaffOrderState.change_status(order["id"].to(str), order["status"].to(str)), # pylint: disable=no-value-for-parameter
                 width="100%"
             ),
         )

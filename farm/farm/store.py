@@ -191,7 +191,7 @@ def product_card(product: rx.Var[dict]):
             ),
             rx.button(
                 rx.cond(is_out_of_stock, "Out of Stock", "Add to Order"),
-                on_click=lambda: StoreState.select_product(product),
+                on_click=lambda: StoreState.select_product(product), # pylint: disable=no-value-for-parameter
                 width="100%",
                 style={
                     "background_color": rx.cond(is_out_of_stock, "#e11d48", "#2d5a27"),
@@ -250,7 +250,7 @@ def storefront_page():
             rx.box(
                 rx.hstack(
                     rx.icon("shopping-basket", size=25, color="white"),
-                    rx.badge(StoreState.cart_count.to(str), color_scheme="orange", variant="solid", border_radius="full"),
+                    rx.badge(StoreState.cart_count.to(str), color_scheme="orange", variant="solid", border_radius="full"), # pylint: disable=no-member
                 ),
                 position="fixed", bottom="40px", right="30px",
                 background_color="#4caf50", padding="15px", border_radius="50px",
