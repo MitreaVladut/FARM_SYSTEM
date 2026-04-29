@@ -66,7 +66,7 @@ def staff_page():
             rx.hstack(
                 rx.button("Generate Salary/Hours Report", color_scheme="blue", size="2"),
                 rx.button("View Daily Schedule", color_scheme="blue", size="2"),
-                rx.button("Process Orders", color_scheme="green", size="2"),
+                rx.button("Process Orders", on_click=rx.redirect("/orders"), color_scheme="green", size="2"),
                 rx.button("Export Employee List", color_scheme="blue", size="2"),
                 spacing="3",
                 padding_y="10px",

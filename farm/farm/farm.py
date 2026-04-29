@@ -8,12 +8,20 @@ from farm.register import register_page # Add this import
 from .inventory_admin import inventory_admin_page
 from farm.order import order_page
 from .staff_orders import staff_orders_page
+from farm.reports import reports_page
+from farm.data_management import data_management_page
+
 # pylint: disable=not-callable
 app = rx.App(
     theme=rx.theme(
-        accent_color="grass",
-        radius="medium",
-    )
+        appearance="light", # Forțăm modul light pentru a evita gri-ul pe gri
+        accent_color="green",
+        radius="large",
+    ),
+    style={
+        "background_color": "#ffffff", # Fundalul paginii (Light Gray/Blue)
+        "color": "black",
+    }
 )
 
 # REQ: Storefront is now the landing page
@@ -24,4 +32,6 @@ app.add_page(staff_page, route="/staff")
 app.add_page(register_page, route="/register")
 app.add_page(order_page, route="/order")
 app.add_page(inventory_admin_page, route="/admin/inventory")
-app.add_page(staff_orders_page, route="/admin/orders")
+app.add_page(staff_orders_page, route="/orders")
+app.add_page(reports_page, route="/admin/reports")
+app.add_page(data_management_page, route="/admin/data")

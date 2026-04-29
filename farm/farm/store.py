@@ -2,6 +2,7 @@
 import reflex as rx
 from .db import get_all_inventory  # Import your new db helper
 import re # Add this import at the top of store.py
+from farm.login import LoginState # <-- Importul adăugat pentru a citi starea de logare
 
 class StoreState(rx.State):  # pylint: disable=inherit-non-class
     """Handle search and order logic for customers."""
@@ -95,8 +96,6 @@ class StoreState(rx.State):  # pylint: disable=inherit-non-class
     @rx.var
     def cart_count(self) -> int:
         return len(self.cart)
-    
-    
 
     def fetch_inventory(self):
         """Called when the page loads to pull data from MongoDB."""
@@ -175,59 +174,99 @@ def quantity_dialog():
     )
 
 def product_card(product: rx.Var[dict]):
-    """Component for individual vegetable cards."""
     is_out_of_stock = (product["status"] == "Out of Stock")
     
     return rx.card(
         rx.vstack(
             rx.image(
                 src=product["image"], 
-                width="100%", height="150px", object_fit="cover", border_radius="8px"
+                width="100%", height="160px", object_fit="cover", border_radius="10px"
             ),
             rx.vstack(
-                rx.text(product["name"], size="4", weight="bold", color="#2d5a27"),
-                rx.text(product["price"], size="3", weight="bold", color="#c2410c"),
+                rx.text(product["name"], size="4", weight="bold", color="#1e293b"), # Slate Dark Text
+                rx.text(product["price"], size="3", weight="bold", color="#2d5a27"), # Forest Green Price
                 align_items="start", spacing="1", width="100%",
             ),
             rx.button(
-                rx.cond(is_out_of_stock, "Out of Stock", "Add to Order"),
-                on_click=lambda: StoreState.select_product(product), # pylint: disable=no-value-for-parameter
+                rx.cond(is_out_of_stock, "Out of Stock", "Add to Cart"),
+                on_click=lambda: StoreState.select_product(product),
                 width="100%",
                 style={
-                    "background_color": rx.cond(is_out_of_stock, "#e11d48", "#2d5a27"),
+                    "background_color": rx.cond(is_out_of_stock, "#b10000", "#2d5a27"),
                     "color": "white",
-                    "_hover": {"background_color": rx.cond(is_out_of_stock, "#e11d48", "#1e3a1a")}
+                    "font_weight": "bold",
+                    "_hover": {"transform": "scale(1.02)", "transition": "0.2s"}
                 },
                 disabled=is_out_of_stock,
             ),
             spacing="3",
         ),
-        width="230px",
+        width="240px",
+        padding="12px",
         background_color="white",
+        border="1px solid #e2e8f0", # Border fin pentru separare de fundal
+        box_shadow="0 10px 15px -3px rgba(0, 0, 0, 0.1)", # Depth Layering
+    )
+def navbar():
+    """Bara de navigare reactivă - înlocuiește vechiul header static."""
+    return rx.hstack(
+        rx.heading("🚜 Farm Store", size="6", color="white"),
+        rx.spacer(),
+        
+        # Verificăm dinamic dacă utilizatorul este logat folosind LoginState
+        rx.cond(
+            LoginState.is_authenticated,
+            
+            # UI pentru utilizator CONECTAT (afișăm numele și butoanele de profil)
+            rx.hstack(
+                rx.text("Hello, ", LoginState.user_name, "!", weight="bold", color="white"),
+                
+                # Afișăm butonul către panoul de control DOAR pentru Admin sau Staff
+                rx.cond(
+                    LoginState.user_role == "Admin",
+                    rx.button("Admin Panel", on_click=rx.redirect("/admin"), color_scheme="gray", variant="solid"),
+                    rx.cond(
+                        LoginState.user_role == "Staff",
+                        rx.button("Staff Panel", on_click=rx.redirect("staff"), color_scheme="gray", variant="solid"),
+                        rx.fragment() # Nu afișăm nimic în plus pentru rolul "Customer"
+                    )
+                ),
+                
+                rx.button("Logout", on_click=LoginState.logout, color_scheme="red", variant="solid"),
+                align_items="center",
+                spacing="4"
+            ),
+            
+            # UI pentru vizitator NECONECTAT (doar butonul de Login)
+            rx.button("Login", on_click=rx.redirect("/login"), size="2", variant="solid", background_color="white", color="#2d5a27")
+        ),
+        
+        width="100%",
+        padding="15px 30px",
+        background_color="#2d5a27", # Păstrăm tema verde
+        align_items="center"
     )
 
 def storefront_page():
     return rx.box(
         quantity_dialog(), # Modal component placed here
-        # Navigation Header
-        rx.hstack(
-            rx.heading("Farm Fresh Produce", color="white", size="5"),
-            rx.spacer(),
-            rx.button(
-                "Login", on_click=rx.redirect("/login"), 
-                size="2", variant="outline", background_color="white", color="#2d5a27"
-            ),
-            background_color="#2d5a27", padding="12px", width="100%",
-        ),
+        
+        # Bara de navigare reactivă pe care am creat-o mai sus
+        navbar(),
         
         rx.vstack(
             # Search Section
             rx.center(
                 rx.input(
-                    placeholder="Search vegetables...",
+                    placeholder="Pick a vegetable",
                     on_change=StoreState.set_search_value,
-                    width="500px", margin_top="30px", border="2px solid #2d5a27",
-                    border_radius="full", padding_x="20px", background_color="white",
+                    width="600px", 
+                    margin_top="40px", 
+                    border="2px solid #2d5a27",
+                    box_shadow="lg",
+                    background_color="white",
+                    size="3",
+                    border_radius="full",
                 ),
                 width="100%",
             ),

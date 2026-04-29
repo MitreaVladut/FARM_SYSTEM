@@ -31,21 +31,19 @@ def seed_users():
         {"email": "maria.ionescu@farm.ro", "password": "staff123", "role": "Staff", "name": "Ionescu Maria"},
         {"email": "andrei.georgescu@farm.ro", "password": "staff123", "role": "Staff", "name": "Georgescu Andrei"}
     ]
+    db.users.delete_many({})
+    print("🗑️ Conturile vechi (nesecurizate) au fost șterse.")
 
     for user_data in users_to_seed:
-        if not db.users.find_one({"email": user_data["email"]}):
-            salt = bcrypt.gensalt()
-            hashed_pw = bcrypt.hashpw(user_data["password"].encode('utf-8'), salt)
-            
-            db.users.insert_one({
-                "email": user_data["email"],
-                "password_hash": hashed_pw.decode('utf-8'),
-                "role": user_data["role"],
-                "name": user_data["name"]
-            })
-            print(f"✅ User {user_data['email']} created successfully!")
-        else:
-            print(f"ℹ️ User {user_data['email']} already exists.")
-
+        salt = bcrypt.gensalt()
+        hashed_pw = bcrypt.hashpw(user_data["password"].encode('utf-8'), salt)
+        
+        db.users.insert_one({
+            "email": user_data["email"],
+            "password": hashed_pw.decode('utf-8'), # Modificat din 'password_hash' în 'password'
+            "role": user_data["role"],
+            "name": user_data["name"]
+        })
+        print(f"✅ User {user_data['email']} ({user_data['role']}) a fost creat cu parolă securizată!")
 if __name__ == "__main__":
     seed_users()

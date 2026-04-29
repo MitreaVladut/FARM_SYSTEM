@@ -1,62 +1,121 @@
-"""Login page for Farm Management System"""
+"""Login Page and Authentication State Management"""
 import reflex as rx
-import bcrypt
-from farm.db import get_user_by_email
-from farm.store import StoreState
+from .db import Database
 
-class LoginState(rx.State):  # pylint: disable=inherit-non-class
+class LoginState(rx.State): # pylint: disable=inherit-non-class
+    """Manages the authentication session and login logic."""
     email: str = ""
     password: str = ""
     error_message: str = ""
-
-    async def login(self):
-        """REQ-1.2: Authenticate and redirect based on role."""
-        if not self.email or not self.password:
-            self.error_message = "Please fill in all fields"
-            return
-
-        user = get_user_by_email(self.email)
-
-        if user:
-            stored_hash = user["password_hash"].encode('utf-8')
-            # In LoginState.login (login.py)
-            if bcrypt.checkpw(self.password.encode('utf-8'), stored_hash):
-                store = await self.get_state(StoreState)
     
-                # 1. Capture the EXACT role from the database
-                user_role = user.get("role", "Customer") 
-    
-                # 2. Save it to the global state
-                store.authenticated = True
-                store.user_role = user_role 
-    
-                # 3. Redirect based on that specific role
-                if user_role == "Admin":
-                    return rx.redirect("/admin")
-                elif user_role == "Staff":
-                    return rx.redirect("/admin/orders") # or wherever your staff page is
-                else:
-                    return rx.redirect("/") # Customers go home
+    # Core session variables isolated from StoreState
+    is_authenticated: bool = False
+    current_user_id: str = ""
+    user_role: str = ""
+    user_name: str = ""
+
+    def login(self):
+        """Processes the login attempt and redirects based on role."""
+        print(f"🔍 1. Încercare de logare pentru: '{self.email}'")
+        self.error_message = "" 
         
-        self.error_message = "Invalid email or password"
+        # Apelăm baza de date
+        user = Database.verify_user(self.email, self.password)
+        print(f"🔍 2. Răspuns de la baza de date: {user}")
+        
+        if user:
+            print(f"✅ 3. Autentificare reușită! Rol: {user.get('role')}. Pregătesc redirectul...")
+            self.is_authenticated = True
+            self.current_user_id = user["_id"]
+            self.user_role = user.get("role", "Customer")
+            self.user_name = user.get("name", "User")
+            
+            self.password = "" # Curățăm parola
+            
+            if self.user_role == "Admin":
+                print("🚀 4. Trimit user-ul la /admin")
+                return rx.redirect("/admin")
+            elif self.user_role == "Staff":
+                print("🚀 4. Trimit user-ul la /staff")
+                return rx.redirect("/staff")
+            else:
+                print("🚀 4. Trimit user-ul la /")
+                return rx.redirect("/")
+        else:
+            print("❌ 3. Autentificare eșuată. User inexistent sau parolă greșită.")
+            self.error_message = "Invalid email or password."
+        
+    def logout(self):
+        """Clears the session and returns to storefront."""
+        self.reset() # Clears all state variables
+        return rx.redirect("/")
 
 def login_page():
-    return rx.center(
-        rx.vstack(
-            rx.heading("Login to Farm System", color= "green", size="9"),
-            rx.input(placeholder="Email", color = "white", on_change=LoginState.set_email, width="100%"),
-            rx.input(placeholder="Password", color = "white", type="password", on_change=LoginState.set_password, width="100%"),
-            rx.text(LoginState.error_message, color="red"),
-            rx.button("Login", on_click=LoginState.login, width="100%", color_scheme="green"),
-            rx.link("Back to Store", href="/", size="2"),
-            # login.py (Inside the login form vstack)
-            rx.link("New here? Create an account", href="/register", size="2", color="#2d5a27"),
-            spacing="4",
-            padding="40px",
-            background="white",
-            border_radius="20px",
-            box_shadow="lg",
-        ),
-        height="100vh",
-        background_color="#f8f9fa",
+    """Renders the login user interface."""
+    return rx.box(
+        rx.center(
+            rx.card(
+                rx.vstack(
+                    rx.heading("🚜 Farm Login", size="7", color="#2d5a27", margin_bottom="10px"),
+                    
+                    # Error Banner
+                    rx.cond(
+                        LoginState.error_message != "",
+                        rx.callout(
+                            LoginState.error_message,
+                            icon="alert-triangle",
+                            color_scheme="red",
+                            role="alert",
+                            width="100%",
+                            margin_bottom="15px"
+                        )
+                    ),
+                    
+                    # Input Fields
+                    rx.text("Email", weight="bold", size="2"),
+                    rx.input(
+                        placeholder="admin@farm.com",
+                        on_change=LoginState.set_email, # pylint: disable=no-member
+                        width="100%",
+                        margin_bottom="15px"
+                    ),
+                    
+                    rx.text("Password", weight="bold", size="2"),
+                    rx.input(
+                        type="password",
+                        placeholder="••••••••",
+                        on_change=LoginState.set_password, # pylint: disable=no-member
+                        width="100%",
+                        margin_bottom="20px"
+                    ),
+                    
+                    # Submit Button
+                    rx.button(
+                        "Sign In",
+                        on_click=LoginState.login, # pylint: disable=no-member
+                        width="100%",
+                        size="3",
+                        color_scheme="grass"
+                    ),
+                    
+                    # Navigation Links
+                    rx.hstack(
+                        rx.link("← Back to Store", href="/", color="gray", size="2"),
+                        rx.spacer(),
+                        rx.link("New here? Create an account", href="/register", size="2", color="#2d5a27"),
+                        width="100%",
+                        margin_top="15px"
+                    ),
+                    
+                    width="100%",
+                    align_items="start"
+                ),
+                width="400px",
+                padding="30px",
+                box_shadow="lg"
+            ),
+            width="100%",
+            height="100vh",
+            background_color="#f8fafc"
+        )
     )

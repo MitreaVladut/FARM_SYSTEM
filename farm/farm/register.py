@@ -1,10 +1,8 @@
-"""Registration page for Farm Management System - REQ-6.1"""
+"""Registration Page"""
 import reflex as rx
-import bcrypt
-from farm.db import get_user_by_email, create_user
+from .db import Database
 
-class RegisterState(rx.State):  # pylint: disable=inherit-non-class
-    """State for customer registration."""
+class RegisterState(rx.State): # pylint: disable=inherit-non-class
     name: str = ""
     email: str = ""
     password: str = ""
@@ -12,76 +10,104 @@ class RegisterState(rx.State):  # pylint: disable=inherit-non-class
     error_message: str = ""
 
     def register(self):
-        """REQ-1.2: Account creation with email and hashed password."""
+        """Validează inputurile și creează contul."""
+        self.error_message = ""
+        
+        # Validări de bază
         if not self.name or not self.email or not self.password:
-            self.error_message = "All fields are required."
+            self.error_message = "Please fill in all fields."
             return
-
+        
         if self.password != self.confirm_password:
             self.error_message = "Passwords do not match."
             return
-
-        # Check if user already exists
-        if get_user_by_email(self.email):
-            self.error_message = "An account with this email already exists."
-            return
-
-        try:
-            # Hash password before storing
-            salt = bcrypt.gensalt()
-            hashed_pw = bcrypt.hashpw(self.password.encode('utf-8'), salt)
-
-            new_user = {
-                "name": self.name,
-                "email": self.email,
-                "password_hash": hashed_pw.decode('utf-8'),
-                "role": "Customer"  # Default role for new signups
-            }
             
-            create_user(new_user)
+        # Încercăm să creăm contul în DB (rolul implicit va fi "Customer")
+        success = Database.create_user(self.email, self.password, self.name)
+        
+        if success:
+            # Curățăm câmpurile și trimitem utilizatorul la login
+            self.name = ""
+            self.email = ""
+            self.password = ""
+            self.confirm_password = ""
             return rx.redirect("/login")
-        except Exception as e:
-            self.error_message = f"Registration failed: {str(e)}"
+        else:
+            self.error_message = "An account with this email already exists."
 
 def register_page():
-    return rx.center(
-        rx.vstack(
-            rx.heading("Create Account", size="7", color="#2d5a27"),
-            rx.text("Join our farm-to-table community", color="#666"),
-            
-            rx.vstack(
-                rx.text("Full Name", size="2", weight="medium", width="100%"),
-                rx.input(placeholder="John Doe", on_change=RegisterState.set_name, width="100%"),
-                
-                rx.text("Email", size="2", weight="medium", width="100%"),
-                rx.input(type="email", placeholder="email@example.com", on_change=RegisterState.set_email, width="100%"),
-                
-                rx.text("Password", size="2", weight="medium", width="100%"),
-                rx.input(type="password", placeholder="Create password", on_change=RegisterState.set_password, width="100%"),
-                
-                rx.text("Confirm Password", size="2", weight="medium", width="100%"),
-                rx.input(type="password", placeholder="Repeat password", on_change=RegisterState.set_confirm_password, width="100%"),
-                
-                rx.text(RegisterState.error_message, color="red", size="2"),
-                
-                rx.button(
-                    "Sign Up", 
-                    on_click=RegisterState.register,
-                    width="100%", 
-                    color_scheme="green",
-                    margin_top="10px"
+    return rx.box(
+        rx.center(
+            rx.card(
+                rx.vstack(
+                    rx.heading("🚜 Create Account", size="7", color="#2d5a27", margin_bottom="10px"),
+                    
+                    # Banner pentru erori
+                    rx.cond(
+                        RegisterState.error_message != "",
+                        rx.callout(
+                            RegisterState.error_message,
+                            icon="alert-triangle",
+                            color_scheme="red",
+                            role="alert",
+                            width="100%",
+                            margin_bottom="15px"
+                        )
+                    ),
+                    
+                    rx.text("Full Name", weight="bold", size="2"),
+                    rx.input(
+                        placeholder="Popescu Ion",
+                        on_change=RegisterState.set_name, # pylint: disable=no-member
+                        width="100%",
+                        margin_bottom="10px"
+                    ),
+                    
+                    rx.text("Email", weight="bold", size="2"),
+                    rx.input(
+                        placeholder="client@farm.ro",
+                        on_change=RegisterState.set_email, # pylint: disable=no-member
+                        width="100%",
+                        margin_bottom="10px"
+                    ),
+                    
+                    rx.text("Password", weight="bold", size="2"),
+                    rx.input(
+                        type="password",
+                        placeholder="••••••••",
+                        on_change=RegisterState.set_password, # pylint: disable=no-member
+                        width="100%",
+                        margin_bottom="10px"
+                    ),
+                    
+                    rx.text("Confirm Password", weight="bold", size="2"),
+                    rx.input(
+                        type="password",
+                        placeholder="••••••••",
+                        on_change=RegisterState.set_confirm_password, # pylint: disable=no-member
+                        width="100%",
+                        margin_bottom="20px"
+                    ),
+                    
+                    rx.button(
+                        "Register",
+                        on_click=RegisterState.register, # pylint: disable=no-member
+                        width="100%",
+                        size="3",
+                        color_scheme="grass"
+                    ),
+                    
+                    rx.link("Already have an account? Sign In", href="/login", color="#2d5a27", margin_top="15px", size="2"),
+                    
+                    width="100%",
+                    align_items="start"
                 ),
-                rx.link("Already have an account? Login", href="/login", size="2", color="#2d5a27"),
-                spacing="3",
-                width="100%",
+                width="400px",
+                padding="30px",
+                box_shadow="lg"
             ),
-            spacing="5",
-            width="400px",
-            padding="40px",
-            border_radius="15px",
-            box_shadow="lg",
-            background_color="white",
-        ),
-        height="100vh",
-        background_color="#f8f9fa",
+            width="100%",
+            height="100vh",
+            background_color="#f8fafc"
+        )
     )
