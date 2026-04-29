@@ -3,16 +3,33 @@ import reflex as rx
 from .auth_utils import require_admin_only
 from .db import get_all_orders, get_all_parcels
 
+# --- COLOR DEFINITIONS ---
+CROP_COLORS = {
+    "Tomatoes": "#ef4444",       # Red
+    "Crisp Lettuce": "#22c55e",  # Fresh Green
+    "New Potatoes": "#eab308",   # Golden Yellow
+    "Organic Carrots": "#f97316",# Orange
+    "Eggplants": "#8b5cf6",      # Purple
+    "Cucumbers": "#10b981",      # Darker Green
+    "Strawberries": "#e11d48",   # Berry Red
+    "Onions": "#fef08a",         # Pale Yellow
+}
+
+# Fallback colors if a crop isn't in the dictionary
+DEFAULT_COLORS = ["#3b82f6", "#06b6d4", "#d946ef", "#f43f5e", "#84cc16"]
+
+
 class ReportState(rx.State):  # pylint: disable=inherit-non-class
     financial_data: list[dict] = []
     total_revenue: str = "0.00 RON"
     
-    # New variable for the chart
+    # Variable for the chart
     crop_distribution: list[dict] = []
 
     def load_financial_report(self):
         """REQ-9.5: Financial information represented in table form."""
         try:
+            # 1. Load Financials
             orders = get_all_orders()
             self.financial_data = orders
             
@@ -26,17 +43,37 @@ class ReportState(rx.State):  # pylint: disable=inherit-non-class
                         pass
             self.total_revenue = f"{total:.2f} RON"
             
-            # REQ-9.6: Load and aggregate crop data
+            # 2. REQ-9.6: Load and aggregate crop data for the chart
             parcels = get_all_parcels()
-            distribution = {}
+            
+            # Count the crops
+            crop_counts = {}
             for p in parcels:
-                crop = p.get("crop", "Unassigned")
-                distribution[crop] = distribution.get(crop, 0) + 1
+                crop_name = p.get("crop", "Unknown")
+                crop_counts[crop_name] = crop_counts.get(crop_name, 0) + 1
+            
+            # Format the data for the Pie Chart AND add the specific color
+            formatted_data = []
+            color_index = 0
+            
+            for name, count in crop_counts.items():
+                # Try to get the specific vegetable color, otherwise use a fallback
+                slice_color = CROP_COLORS.get(name)
+                if not slice_color:
+                    slice_color = DEFAULT_COLORS[color_index % len(DEFAULT_COLORS)]
+                    color_index += 1
                 
-            self.crop_distribution = [{"name": k, "value": v} for k, v in distribution.items()]
+                formatted_data.append({
+                    "name": name,
+                    "value": count,
+                    "fill": slice_color  # <--- Recharts automatically reads this key!
+                })
+                
+            self.crop_distribution = formatted_data
             
         except Exception as e:
             print(f"Error loading reports: {e}")
+
 
 def report_row(order: dict):
     """Generates a single row for the financial table."""
@@ -51,6 +88,7 @@ def report_row(order: dict):
         ),
         rx.table.cell(order["total"].to(str), weight="bold"),
     )
+
 
 @require_admin_only
 def reports_page():
@@ -92,7 +130,8 @@ def reports_page():
                         cx="50%",
                         cy="50%",
                         outer_radius=100,
-                        fill="#4caf50", # Matches your green theme
+                        # Notice the hardcoded `fill="#4caf50"` has been REMOVED here
+                        # so it can read the colors from our dictionary instead!
                         label=True,
                     ),
                     rx.recharts.graphing_tooltip(),
