@@ -1,35 +1,34 @@
 """Report Generation Page - REQ-9.0"""
 import reflex as rx
 from .auth_utils import require_admin_only
-from .db import get_all_orders, get_all_parcels
+from .db import get_all_orders, get_all_parcels, get_all_production_records
 
 # --- COLOR DEFINITIONS ---
 CROP_COLORS = {
     "Tomatoes": "#ef4444",       # Red
     "Crisp Lettuce": "#22c55e",  # Fresh Green
-    "New Potatoes": "#eab308",   # Golden Yellow
+    "New Potatoes": "#493806",   # Golden Yellow
     "Organic Carrots": "#f97316",# Orange
     "Eggplants": "#8b5cf6",      # Purple
     "Cucumbers": "#10b981",      # Darker Green
     "Strawberries": "#e11d48",   # Berry Red
     "Onions": "#fef08a",         # Pale Yellow
+    "Zucchini": "#05661D"
 }
 
-# Fallback colors if a crop isn't in the dictionary
-DEFAULT_COLORS = ["#3b82f6", "#06b6d4", "#d946ef", "#f43f5e", "#84cc16"]
+DEFAULT_COLORS = ["#f97316", "#22c55e","#493806", "#f43f5e", "#05661D"]
 
 
 class ReportState(rx.State):  # pylint: disable=inherit-non-class
     financial_data: list[dict] = []
     total_revenue: str = "0.00 RON"
-    
-    # Variable for the chart
     crop_distribution: list[dict] = []
+    production_history: list[dict] = [] # Added for REQ-9.2
 
     def load_financial_report(self):
-        """REQ-9.5: Financial information represented in table form."""
+        """Loads financials, crop distribution, and production history."""
         try:
-            # 1. Load Financials
+            # 1. Load Financials (REQ-9.5)
             orders = get_all_orders()
             self.financial_data = orders
             
@@ -43,21 +42,16 @@ class ReportState(rx.State):  # pylint: disable=inherit-non-class
                         pass
             self.total_revenue = f"{total:.2f} RON"
             
-            # 2. REQ-9.6: Load and aggregate crop data for the chart
+            # 2. Load Crop Data for Chart (REQ-9.6)
             parcels = get_all_parcels()
-            
-            # Count the crops
             crop_counts = {}
             for p in parcels:
                 crop_name = p.get("crop", "Unknown")
                 crop_counts[crop_name] = crop_counts.get(crop_name, 0) + 1
             
-            # Format the data for the Pie Chart AND add the specific color
             formatted_data = []
             color_index = 0
-            
             for name, count in crop_counts.items():
-                # Try to get the specific vegetable color, otherwise use a fallback
                 slice_color = CROP_COLORS.get(name)
                 if not slice_color:
                     slice_color = DEFAULT_COLORS[color_index % len(DEFAULT_COLORS)]
@@ -66,10 +60,12 @@ class ReportState(rx.State):  # pylint: disable=inherit-non-class
                 formatted_data.append({
                     "name": name,
                     "value": count,
-                    "fill": slice_color  # <--- Recharts automatically reads this key!
+                    "fill": slice_color  
                 })
-                
             self.crop_distribution = formatted_data
+
+            # 3. Load Production History (REQ-9.2)
+            self.production_history = get_all_production_records()
             
         except Exception as e:
             print(f"Error loading reports: {e}")
@@ -89,6 +85,17 @@ def report_row(order: dict):
         rx.table.cell(order["total"].to(str), weight="bold"),
     )
 
+def history_row(record: dict):
+    """Generates a single row for the production history table."""
+    return rx.table.row(
+        rx.table.cell(record["harvest_date"].to(str)),
+        rx.table.cell(record["parcel_name"].to(str), weight="bold"),
+        rx.table.cell(record["crop"].to(str)),
+        rx.table.cell(record["actual_yield"].to(str) + " kg"),
+        rx.table.cell(record["quality_notes"].to(str)),
+        rx.table.cell(record["modified_by"].to(str)),
+    )
+
 
 @require_admin_only
 def reports_page():
@@ -96,7 +103,7 @@ def reports_page():
         rx.vstack(
             # Header
             rx.hstack(
-                rx.heading("Farm Financial Reports", size="7", color="#2d5a27"),
+                rx.heading("Farm Financial & Production Reports", size="7", color="#2d5a27"),
                 rx.spacer(),
                 rx.button(
                     "Refresh Data", 
@@ -119,7 +126,7 @@ def reports_page():
                 width="100%",
             ),
 
-            # Graphical View (REQ-9.6) - Recharts Pie Chart
+            # Graphical View (REQ-9.6)
             rx.heading("Crop Distribution on Parcels", size="5", margin_top="30px", color="#2d5a27"),
             rx.card(
                 rx.recharts.pie_chart(
@@ -130,8 +137,6 @@ def reports_page():
                         cx="50%",
                         cy="50%",
                         outer_radius=100,
-                        # Notice the hardcoded `fill="#4caf50"` has been REMOVED here
-                        # so it can read the colors from our dictionary instead!
                         label=True,
                     ),
                     rx.recharts.graphing_tooltip(),
@@ -156,11 +161,30 @@ def reports_page():
                     ),
                 ),
                 rx.table.body(
-                    # pylint: disable=no-value-for-parameter
                     rx.foreach(ReportState.financial_data, lambda order: report_row(order))
                 ),
                 width="100%",
                 variant="surface",
+            ),
+
+            # Production History Table (REQ-9.2)
+            rx.heading("Production History", size="5", margin_top="30px", color="#2d5a27"),
+            rx.table.root(
+                rx.table.header(
+                    rx.table.row(
+                        rx.table.column_header_cell("Harvest Date"),
+                        rx.table.column_header_cell("Parcel Name"),
+                        rx.table.column_header_cell("Crop Type"),
+                        rx.table.column_header_cell("Actual Yield"),
+                        rx.table.column_header_cell("Quality Notes"),
+                        rx.table.column_header_cell("Harvested By"),
+                        style={"background_color": "#2d5a27", "color": "white"}
+                    ),
+                ),
+                rx.table.body(rx.foreach(ReportState.production_history, history_row)),
+                width="100%", 
+                variant="surface", 
+                box_shadow="0 4px 6px -1px rgba(0, 0, 0, 0.1)",
             ),
             
             # Navigation

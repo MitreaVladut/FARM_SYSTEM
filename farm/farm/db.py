@@ -7,6 +7,7 @@ from dotenv import load_dotenv, find_dotenv
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 from bson.objectid import ObjectId # Moved import to the top for cleanliness
+from pymongo.errors import PyMongoError
 
 load_dotenv(find_dotenv())
 
@@ -221,6 +222,7 @@ def get_all_crops() -> list:
 
     return combined_crops
 
+# Note the added latitude and longitude in the arguments here!
 def create_parcel(name: str, area: str, crop: str, planting_date: str) -> bool:
     """Saves a new land parcel to the database."""
     try:
@@ -230,7 +232,7 @@ def create_parcel(name: str, area: str, crop: str, planting_date: str) -> bool:
             "area": area,
             "crop": crop,
             "planting_date": planting_date,
-            "status": "Planned" # Default status for new parcels
+            "status": "Planned" 
         })
         return True
     except Exception as e:
@@ -244,3 +246,83 @@ def get_all_parcels() -> list:
     for p in parcels:
         p["id"] = str(p.pop("_id"))
     return parcels
+
+def harvest_parcel(parcel_id: str, actual_yield: float, quality_notes: str, user_name: str) -> bool:
+    """Feature 4: Production Cycle Tracking with Smart Inventory Matching"""
+    try:
+        db = Database.get_db()
+        
+        parcel = db.parcels.find_one({"_id": ObjectId(parcel_id)})
+        if not parcel:
+            return False
+            
+        crop_name = str(parcel.get("crop", "Unknown")).strip()
+        
+        # Prevenim crearea produsului "none"
+        if not crop_name or crop_name.lower() == "none" or crop_name == "Unknown":
+            print("Cannot harvest an empty or None parcel.")
+            return False 
+            
+        # 1. Eliberăm parcela (REQ-4.6)
+        db.parcels.update_one(
+            {"_id": ObjectId(parcel_id)},
+            {"$set": {"status": "Available", "crop": "None", "planting_date": "None"}}
+        )
+        
+        # 2. Salvăm istoricul de producție
+        harvest_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        db.production_records.insert_one({
+            "parcel_name": parcel.get("name", "Unknown"),
+            "crop": crop_name,
+            "planting_date": parcel.get("planting_date", "Unknown"),
+            "harvest_date": harvest_date,
+            "actual_yield": float(actual_yield),
+            "quality_notes": quality_notes,
+            "modified_by": user_name 
+        })
+        
+        # 3. SMART MATCHING pentru Magazin
+        inventory_items = list(db.inventory.find())
+        matched_item = None
+        
+        for item in inventory_items:
+            inv_name = str(item.get("name", "")).lower()
+            c_name = crop_name.lower()
+            
+            # Verificăm dacă "Tomatoes" e în "Fresh Tomatoes" sau invers
+            if c_name in inv_name or inv_name in c_name:
+                matched_item = item
+                break
+                
+        if matched_item:
+            # Produs găsit! Adăugăm cantitatea la stocul curent
+            new_stock = float(matched_item.get("stock", 0)) + float(actual_yield)
+            db.inventory.update_one(
+                {"_id": matched_item["_id"]}, 
+                {"$set": {"stock": new_stock}}
+            )
+        else:
+            # Creăm un produs nou DOAR dacă nu există nimic similar
+            db.inventory.insert_one({
+                "name": crop_name, 
+                "stock": float(actual_yield), 
+                "price": 0, 
+                "unit": "kg"
+            })
+            
+        return True
+    except Exception as e:
+        print(f"Error harvesting parcel: {e}")
+        return False
+    
+def get_all_production_records() -> list:
+    """Feature 9: Fetches all production history records."""
+    try:
+        db = Database.get_db()
+        records = list(db.production_records.find())
+        for r in records:
+            r["id"] = str(r.pop("_id"))
+        return records
+    except Exception as e:
+        print(f"Error fetching production records: {e}")
+        return []
