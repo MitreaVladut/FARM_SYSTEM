@@ -453,15 +453,19 @@ class DashboardState(rx.State):
     
     @rx.var
     def filtered_parcels(self) -> list[dict]:
+        """REQ-8.2: Search functionality by parcel location."""
         if not self.search_query:
             return self.parcels
             
         query = self.search_query.lower().strip()
-        query = "".join(e for e in query if e.isalnum() or e.isspace())
+        query = "".join(e for e in query if e.isalnum() or e.isspace() or e == '.') # Allow decimals for lat/lng
         
         return [
             p for p in self.parcels 
-            if query in str(p.get("name", "")).lower() or query in str(p.get("status", "")).lower()
+            if query in str(p.get("name", "")).lower() 
+            or query in str(p.get("status", "")).lower()
+            or query in str(p.get("latitude", ""))  # REQ-8.2: Search by Latitude
+            or query in str(p.get("longitude", "")) # REQ-8.2: Search by Longitude
         ]
     
     def open_expand_modal(self, parcel_id: str, current_w: int, current_h: int):
@@ -811,7 +815,19 @@ def dashboard_page():
             ),
 
             rx.vstack(
-                rx.heading("My Parcels", size="4", color="#2d5a27", width="100%"),
+                
+                # 1. Added an hstack to put the search bar right next to the title
+                rx.hstack(
+                    rx.heading("My Parcels", size="4", color="#2d5a27"),
+                    rx.spacer(),
+                    rx.input(
+                        placeholder="🔍 Search name, status, lat, or lng...", 
+                        on_change=DashboardState.set_search_query,
+                        width="300px"
+                    ),
+                    width="100%", align_items="center"
+                ),
+                
                 rx.cond(
                     DashboardState.has_parcels,
                     rx.table.root(
@@ -827,7 +843,7 @@ def dashboard_page():
                                 style={"background_color": "#2d5a27", "color": "white"}
                             ),
                         ),
-                        rx.table.body(rx.foreach(DashboardState.parcels, parcel_row)),
+                        rx.table.body(rx.foreach(DashboardState.filtered_parcels, parcel_row)),
                         width="100%", variant="surface", box_shadow="0 4px 6px -1px rgba(0, 0, 0, 0.1)",
                     ),
                     rx.text("No parcels registered yet. Click '+ New Parcel' to add one.", color="gray")
@@ -835,7 +851,9 @@ def dashboard_page():
                 width="95%", spacing="3", padding_y="20px",
             ),
 
-            rx.vstack(
+            
+            
+            rx.vstack(         
                 rx.heading("Farm Layout Simulator", size="4", color="#2d5a27", width="100%"),
                 rx.box(
                     rx.cond(

@@ -306,7 +306,8 @@ def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str,
 
 
 def harvest_parcel(parcel_id: str, actual_yield: float, quality_notes: str, user_name: str) -> bool:
-    """Feature 4: Production Cycle Tracking with Smart Inventory Matching"""
+    """Feature 4: Production Tracking with Expected Yield & Fingerprinting."""
+    import re
     try:
         db = Database.get_db()
         
@@ -315,64 +316,62 @@ def harvest_parcel(parcel_id: str, actual_yield: float, quality_notes: str, user
             return False
             
         crop_name = str(parcel.get("crop", "Unknown")).strip()
-        
-        # Prevenim crearea produsului "none"
         if not crop_name or crop_name.lower() == "none" or crop_name == "Unknown":
-            print("Cannot harvest an empty or None parcel.")
             return False 
-            
-        # 1. Eliberăm parcela (REQ-4.6)
+
+        # --- REQ-4.7: Calculate Expected Yield ---
+        # 1. Extract the raw number from area (e.g., "2.5 ha" -> 2.5)
+        area_match = re.search(r"(\d+(\.\d+)?)", str(parcel.get("area", "0")))
+        area_val = float(area_match.group(1)) if area_match else 0.0
+        
+        # 2. Get the crop's yield per hectare from the DB
+        crop_doc = db.crops.find_one({"name": crop_name})
+        expected_yield = 0.0
+        if crop_doc:
+            yield_match = re.search(r"(\d+(\.\d+)?)", str(crop_doc.get("yield_per_ha", "0")))
+            if yield_match:
+                expected_yield = float(yield_match.group(1)) * area_val
+
+        # 1. Free up parcel (REQ-4.6)
         db.parcels.update_one(
             {"_id": ObjectId(parcel_id)},
             {"$set": {"status": "Available", "crop": "None", "planting_date": "None"}}
         )
         
-        # 2. Salvăm istoricul de producție
+        # 2. Save Production History (REQ-4.5, 4.7, 4.8)
         harvest_date = datetime.datetime.now().strftime("%Y-%m-%d")
         db.production_records.insert_one({
             "parcel_name": parcel.get("name", "Unknown"),
             "crop": crop_name,
             "planting_date": parcel.get("planting_date", "Unknown"),
-            "harvest_date": harvest_date,
+            "harvest_date": harvest_date,             # REQ-4.5
+            "expected_yield": expected_yield,         # REQ-4.7: The calculated math
             "actual_yield": float(actual_yield),
             "quality_notes": quality_notes,
-            "modified_by": user_name 
+            "modified_by": user_name                  # REQ-4.8: The User Fingerprint
         })
         
         # 3. SMART MATCHING pentru Magazin
         inventory_items = list(db.inventory.find())
         matched_item = None
-        
         for item in inventory_items:
             inv_name = str(item.get("name", "")).lower()
             c_name = crop_name.lower()
-            
-            # Verificăm dacă "Tomatoes" e în "Fresh Tomatoes" sau invers
             if c_name in inv_name or inv_name in c_name:
                 matched_item = item
                 break
                 
         if matched_item:
-            # Produs găsit! Adăugăm cantitatea la stocul curent
             new_stock = float(matched_item.get("stock", 0)) + float(actual_yield)
-            db.inventory.update_one(
-                {"_id": matched_item["_id"]}, 
-                {"$set": {"stock": new_stock}}
-            )
+            db.inventory.update_one({"_id": matched_item["_id"]}, {"$set": {"stock": new_stock}})
         else:
-            # Creăm un produs nou DOAR dacă nu există nimic similar
-            db.inventory.insert_one({
-                "name": crop_name, 
-                "stock": float(actual_yield), 
-                "price": 0, 
-                "unit": "kg"
-            })
+            db.inventory.insert_one({"name": crop_name, "stock": float(actual_yield), "price": 0, "unit": "kg"})
             
         return True
     except Exception as e:
         print(f"Error harvesting parcel: {e}")
         return False
-    
+
 def get_all_production_records() -> list:
     """Feature 9: Fetches all production history records."""
     try:

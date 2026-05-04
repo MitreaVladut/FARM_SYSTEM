@@ -80,12 +80,27 @@ def staff_navbar():
     )
 
 def order_card(order: rx.Var[Dict[str, Any]]):
-    """Order card with dropdown status and delete button."""
+    """Order card with dropdown status, visual confirmation, and delete button."""
+    is_created = (order["status"] == "Created")
+    
     return rx.card(
         rx.vstack(
             rx.hstack(
                 rx.text(f"Date: {order['timestamp'].to(str)}", size="2", color="#64748b", weight="bold"),
                 rx.spacer(),
+                
+                # REQ-7.8: Visual Confirmation Button
+                rx.cond(
+                    is_created,
+                    rx.button(
+                        "Confirm Order",
+                        color_scheme="green",
+                        size="1",
+                        cursor="pointer",
+                        on_click=lambda: StaffOrderState.set_order_status("Processing", order["id"].to(str))
+                    )
+                ),
+                
                 # Delete Button
                 rx.button(
                     rx.icon("trash-2", size=16),
@@ -96,7 +111,8 @@ def order_card(order: rx.Var[Dict[str, Any]]):
                     cursor="pointer"
                 ),
                 width="100%",
-                align_items="center"
+                align_items="center",
+                spacing="3"
             ),
             rx.divider(margin_y="10px"),
             
@@ -121,7 +137,6 @@ def order_card(order: rx.Var[Dict[str, Any]]):
                 rx.select(
                     ["Created", "Pending", "Processing", "Shipped", "Delivered", "Cancelled"],
                     value=order["status"].to(str),
-                    # When dropdown changes, send the new value and the order ID to the state
                     on_change=lambda value: StaffOrderState.set_order_status(value, order["id"].to(str)),
                     width="100%",
                     color_scheme="grass"

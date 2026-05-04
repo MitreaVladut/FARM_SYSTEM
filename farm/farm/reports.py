@@ -105,11 +105,14 @@ def history_row(record: dict):
         rx.table.cell(record["harvest_date"].to(str)),
         rx.table.cell(record["parcel_name"].to(str), weight="bold"),
         rx.table.cell(record["crop"].to(str)),
-        rx.table.cell(record["actual_yield"].to(str) + " kg"),
+        # REQ-4.7: Expected Yield
+        rx.table.cell(record["expected_yield"].to(str) + " kg", color="gray"),
+        # REQ-4.7: Actual Yield
+        rx.table.cell(record["actual_yield"].to(str) + " kg", weight="bold", color="green"),
         rx.table.cell(record["quality_notes"].to(str)),
+        # REQ-4.8: Fingerprint (Already correctly implemented)
         rx.table.cell(record["modified_by"].to(str)),
     )
-
 
 @require_admin_only
 def reports_page():
@@ -201,6 +204,7 @@ def reports_page():
                             rx.table.column_header_cell("Harvest Date"),
                             rx.table.column_header_cell("Parcel Name"),
                             rx.table.column_header_cell("Crop Type"),
+                            rx.table.column_header_cell("Expected Yield"),
                             rx.table.column_header_cell("Actual Yield"),
                             rx.table.column_header_cell("Quality Notes"),
                             rx.table.column_header_cell("Harvested By"),
