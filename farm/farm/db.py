@@ -90,14 +90,14 @@ class Database:
             cls._client.close()
 
     @classmethod
-    def create_order(cls, cart_items: list, total_price: str) -> bool:
+    def create_order(cls, cart_items: list, total_price: float) -> bool:
         """REQ-6.2: Inserts a new order into the database."""
         try:
             db = cls.get_db()
             order_doc = {
                 "items": cart_items,
-                "total": total_price,
-                "status": "Pending",
+                "total": round(total_price, 2), # REQ-6.6: Stores exact cumulative price
+                "status": "Created",
                 "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
             }
             db.orders.insert_one(order_doc)

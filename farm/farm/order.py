@@ -30,7 +30,7 @@ class OrderState(rx.State):
             self.is_processing = False
             return rx.toast.error("Your cart is empty.")
 
-        # CRITICAL FIX: Deep unpack the Reflex MutableProxy into raw Python types
+        # Deep unpack the Reflex MutableProxy into raw Python types
         clean_cart = []
         for item in store_state.cart:
             clean_cart.append({
@@ -40,20 +40,22 @@ class OrderState(rx.State):
                 "total": float(item["total"])
             })
         
-        # Save to database using the completely clean list
+        # REQ-6.6 FIX: Pass the raw numeric float (cart_total_price) 
+        # instead of the formatted string
         success = Database.create_order(
             cart_items=clean_cart,
-            total_price=str(store_state.formatted_total_price)
+            total_price=float(store_state.cart_total_price)
         )
 
         if success:
             store_state.cart = []
             self.order_successful = True
-            rx.toast.success("Order placed!")
+            rx.toast.success("Order placed! Status: Created")
         else:
             rx.toast.error("Database connection failed. Please try again.")
             
         self.is_processing = False
+
 def cart_item_row(item: dict, index: int):
     """Displays a single row in the checkout summary."""
     return rx.table.row(
@@ -89,7 +91,7 @@ def order_page():
             rx.cond(
                 OrderState.order_successful,
                 rx.callout(
-                    "Order placed successfully! Our staff is currently processing it.",
+                    "Order placed successfully! Status: Created. Our staff is currently processing it.",
                     icon="check-circle",
                     color_scheme="green",
                     width="100%",

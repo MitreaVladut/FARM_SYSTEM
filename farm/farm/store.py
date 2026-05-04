@@ -106,18 +106,31 @@ class StoreState(rx.State):  # pylint: disable=inherit-non-class
 
     @rx.var
     def filtered_inventory(self) -> list[dict]:
-        """Filters the DB results and sorts them alphabetically."""
-        search = self.search_value.strip().lower()
+        """REQ-8.6, REQ-8.7: Filters the DB results securely and case-insensitively."""
+        
+        # 1. Sanitize Input (REQ-8.7): 
+        safe_search = re.sub(r'[^a-zA-Z0-9\s]', '', self.search_value)
+        
+        # 2. Case-Insensitive (REQ-8.6): 
+        search_query = safe_search.strip().lower()
+        
+        # Sort inventory alphabetically
         items = sorted(self.raw_inventory, key=lambda x: x.get("name", ""))
         
-        if not search:
+        if not search_query:
             return items
-        return [item for item in items if search in item.get("name", "").lower()]
+            
+        # 3. Compare the safe, lowercase search query against the lowercase product names
+        return [
+            item for item in items 
+            if search_query in str(item.get("name", "")).lower()
+        ]
 
     @rx.var
     def has_results(self) -> bool:
         """Helper to determine if products exist after filtering."""
         return len(self.filtered_inventory) > 0
+    
 
 def quantity_dialog():
     """The pop-up window for quantity selection."""
@@ -172,6 +185,7 @@ def quantity_dialog():
         open=StoreState.show_dialog,
         on_open_change=StoreState.set_show_dialog,
     )
+    
 
 def product_card(product: rx.Var[dict]):
     is_out_of_stock = (product["status"] == "Out of Stock")
@@ -183,8 +197,16 @@ def product_card(product: rx.Var[dict]):
                 width="100%", height="160px", object_fit="cover", border_radius="10px"
             ),
             rx.vstack(
-                rx.text(product["name"], size="4", weight="bold", color="#1e293b"), # Slate Dark Text
-                rx.text(product["price"], size="3", weight="bold", color="#2d5a27"), # Forest Green Price
+                rx.text(product["name"], size="4", weight="bold", color="#1e293b"),
+                rx.text(product["price"], size="3", weight="bold", color="#2d5a27"),
+                
+                # REQ-5.2: Clearly display remaining quantities in stock
+                rx.badge(
+                    "Remaining Stock: ", product["stock"], 
+                    color_scheme=rx.cond(is_out_of_stock, "red", "blue"),
+                    variant="soft"
+                ),
+                
                 align_items="start", spacing="1", width="100%",
             ),
             rx.button(
@@ -201,12 +223,10 @@ def product_card(product: rx.Var[dict]):
             ),
             spacing="3",
         ),
-        width="240px",
-        padding="12px",
-        background_color="white",
-        border="1px solid #e2e8f0", # Border fin pentru separare de fundal
-        box_shadow="0 10px 15px -3px rgba(0, 0, 0, 0.1)", # Depth Layering
+        width="240px", padding="12px", background_color="white",
+        border="1px solid #e2e8f0", box_shadow="0 10px 15px -3px rgba(0, 0, 0, 0.1)",
     )
+
 def navbar():
     """Bara de navigare reactivă - înlocuiește vechiul header static."""
     return rx.hstack(
@@ -246,6 +266,26 @@ def navbar():
         background_color="#2d5a27", # Păstrăm tema verde
         align_items="center"
     )
+    
+def farm_info_banner():
+    """REQ-5.4: Displays information about the producing farm."""
+    return rx.card(
+        rx.hstack(
+            rx.icon("tractor", size=40, color="#2d5a27"),
+            rx.vstack(
+                rx.heading("About Our Farm", size="5", color="#2d5a27"),
+                rx.text(
+                    "Located in Romania, our farm spans over many hectares "
+                    "of rich, fertile soil. We are committed to sustainable, eco-friendly agriculture, "
+                    "bringing organic, locally-grown produce straight from our fields to your table.",
+                    color="gray", size="2"
+                ),
+                align_items="start"
+            ),
+            spacing="4", align_items="center"
+        ),
+        width="100%", margin_top="20px", padding="20px", background_color="#f0fdf4", border="1px solid #bbf7d0"
+    )
 
 def storefront_page():
     return rx.box(
@@ -255,6 +295,10 @@ def storefront_page():
         navbar(),
         
         rx.vstack(
+
+            # REQ-5.4: Farm Info Banner added right below the navbar
+            rx.box(farm_info_banner(), width="80%", max_width="900px"),
+
             # Search Section
             rx.center(
                 rx.input(

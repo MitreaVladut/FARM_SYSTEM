@@ -36,7 +36,7 @@ class StaffOrderState(rx.State):
         self.fetch_orders() # Refresh UI
 
     def change_status(self, order_id: str, current_status: str):
-        status_flow = {"Pending": "Shipped", "Shipped": "Delivered", "Delivered": "Pending"}
+        status_flow = {"Created": "Pending", "Pending": "Shipped", "Shipped": "Delivered", "Delivered": "Pending"}
         new_status = status_flow.get(current_status, "Pending")
         update_order_status(order_id, new_status)
         self.fetch_orders()
@@ -119,7 +119,7 @@ def order_card(order: rx.Var[Dict[str, Any]]):
             rx.hstack(
                 rx.text("Status:", size="2", weight="bold", color="#1e293b"),
                 rx.select(
-                    ["Pending", "Processing", "Shipped", "Delivered", "Cancelled"],
+                    ["Created", "Pending", "Processing", "Shipped", "Delivered", "Cancelled"],
                     value=order["status"].to(str),
                     # When dropdown changes, send the new value and the order ID to the state
                     on_change=lambda value: StaffOrderState.set_order_status(value, order["id"].to(str)),
