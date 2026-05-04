@@ -178,15 +178,12 @@ def update_order_status(order_id: str, new_status: str):
 
 # Add this under your other functions in farm/db.py
 def get_all_parcels():
-    """REQ-2.4: Fetch all parcels and auto-update status based on planting date."""
+    """REQ-2.4 & Spatial Geometry: Fetch parcels, auto-update status, and repair coordinates."""
     import datetime
     db = Database.get_db()
     parcels = list(db.parcels.find())
     
-    # Gets today's date in 'YYYY-MM-DD' format (reads from your PC clock!)
     today = datetime.date.today().isoformat() 
-
-    print(f"🕒 [SYSTEM TIME] Python thinks today is: {today}")
 
     for parcel in parcels:
         parcel_id = parcel["_id"]
@@ -195,21 +192,37 @@ def get_all_parcels():
 
         # Time-based transitions logic
         if current_status not in ["Available", "Harvested"] and p_date != "None":
-            # If today is past or equal to planting date -> In Production. Otherwise -> Planned.
             new_status = "In Production" if today >= p_date else "Planned"
-
-            print(f"📦 Checking '{parcel.get('name')}': Planted {p_date} -> Status: {new_status}")
-            
-            # If the status just shifted, update the database permanently
             if current_status != new_status:
                 db.parcels.update_one({"_id": parcel_id}, {"$set": {"status": new_status}})
                 parcel["status"] = new_status
+
+        # --- NEW: Spatial Geometry Repair ---
+        # Account for older parcels that lack explicit coordinates by assigning defaults.
+        needs_repair = False
+        updates = {}
+        
+        for coord in ["x", "y"]:
+            if coord not in parcel:
+                parcel[coord] = 0
+                updates[coord] = 0
+                needs_repair = True
+                
+        for dim in ["width", "height"]:
+            if dim not in parcel:
+                parcel[dim] = 10 # Default fallback dimension
+                updates[dim] = 10
+                needs_repair = True
+                
+        if needs_repair:
+            # Update the database permanently to fix the broken document[cite: 3]
+            db.parcels.update_one({"_id": parcel_id}, {"$set": updates})
+        # ------------------------------------
 
         parcel["id"] = str(parcel.pop("_id"))
         parcel["active"] = "true" if parcel.get("active", True) else "false"
         
     return parcels
-
 # --- STAFF MANAGEMENT FUNCTIONS ---
 
 def get_all_staff():
@@ -277,32 +290,32 @@ def get_all_crops() -> list:
     return combined_crops
 
 # Note the added latitude and longitude in the arguments here!
-def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str, lng: str, x: int, y: int, w: int, h: int, soil_type: str, irrigation: bool) -> bool:
-    """Saves a new land parcel to the database (Updated with REQ-2.2 & 2.3)."""
+def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str, lng: str, x: int, y: int, w: int, h: int, soil_type: str, irrigation: bool) -> tuple[bool, str]:
+    """Saves a new land parcel with REQ-2.9 collision detection."""
     try:
         db = Database.get_db()
-        status = "Available" if crop == "None" or not crop else "Planned"
         
+        # 1. Define the proposed geometric shape
+        proposed_shape = {"x": int(x), "y": int(y), "width": int(w), "height": int(h)}
+        
+        # 2. Check for collisions against all existing parcels (REQ-2.9)
+        existing_parcels = list(db.parcels.find())
+        for other in existing_parcels:
+            if is_overlapping(proposed_shape, other):
+                return False, f"Collision detected! This space is already occupied by '{other.get('name', 'another parcel')}'."
+
+        # 3. If no overlap, proceed with creation
+        status = "Available" if crop == "None" or not crop else "Planned"
         db.parcels.insert_one({
-            "name": name,
-            "area": area,
-            "crop": crop,
-            "planting_date": planting_date,
-            "status": status,
-            "latitude": lat,
-            "longitude": lng,
-            "x": int(x),
-            "y": int(y),
-            "width": int(w),
-            "height": int(h),
-            "soil_type": soil_type,      # REQ-2.2
-            "irrigation": irrigation     # REQ-2.3
+            "name": name, "area": area, "crop": crop, "planting_date": planting_date,
+            "status": status, "latitude": lat, "longitude": lng,
+            "x": int(x), "y": int(y), "width": int(w), "height": int(h),
+            "soil_type": soil_type, "irrigation": irrigation
         })
-        return True
+        return True, "Parcel created successfully!"
     except Exception as e:
         print(f"Error creating parcel: {e}")
-        return False
-
+        return False, "Database error while adding parcel."
 
 
 def harvest_parcel(parcel_id: str, actual_yield: float, quality_notes: str, user_name: str) -> bool:
@@ -479,29 +492,35 @@ def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool
         print(f"Expansion error: {e}")
         return False, "Database error during expansion."
     
-def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: int, y: int, w: int, h: int, soil_type: str, irrigation: bool) -> bool:
-    """Updates an existing parcel's details and coordinates."""
+def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: int, y: int, w: int, h: int, soil_type: str, irrigation: bool) -> tuple[bool, str]:
+    """Updates a parcel with REQ-2.9 collision detection."""
     try:
         db = Database.get_db()
+        
+        # 1. Define the proposed resized/moved shape
+        proposed_shape = {"x": int(x), "y": int(y), "width": int(w), "height": int(h)}
+        
+        # 2. Fetch all OTHER parcels (exclude the one we are currently editing)
+        other_parcels = list(db.parcels.find({"_id": {"$ne": ObjectId(parcel_id)}}))
+        
+        # 3. Check for overlaps (REQ-2.9)
+        for other in other_parcels:
+            if is_overlapping(proposed_shape, other):
+                return False, f"Collision detected! Your new size overlaps with '{other.get('name', 'another parcel')}'."
+
+        # 4. If the space is clear, save the changes
         db.parcels.update_one(
             {"_id": ObjectId(parcel_id)},
             {"$set": {
-                "name": name,
-                "area": area,
-                "latitude": lat,
-                "longitude": lng,
-                "x": int(x),
-                "y": int(y),
-                "width": int(w),
-                "height": int(h),
-                "soil_type": soil_type,      # REQ-2.2
-                "irrigation": irrigation     # REQ-2.3
+                "name": name, "area": area, "latitude": lat, "longitude": lng,
+                "x": int(x), "y": int(y), "width": int(w), "height": int(h),
+                "soil_type": soil_type, "irrigation": irrigation
             }}
         )
-        return True
+        return True, f"Parcel '{name}' updated successfully!"
     except Exception as e:
         print(f"Error updating parcel: {e}")
-        return False
+        return False, "Database error during update."
     
 def cancel_customer_order(order_id: str) -> bool:
     """REQ-7.7: Allows a customer to reject and cancel their order."""

@@ -107,49 +107,44 @@ class DashboardState(rx.State):
     # --- GEOMETRIC FARM MAP GENERATOR ---
     @rx.var
     def farm_map_figure(self) -> go.Figure:
-        """Generates a proportional 2D farm layout with distinct geometric fields and fences."""
+        """Generates a true spatial 2D farm layout using X, Y, Width, and Height."""
         fig = go.Figure()
 
-        farm_width = 12.0  
-        farm_height = 8.0 
+        # Track the outermost edges to size the map properly
+        max_boundary_x = 10.0
+        max_boundary_y = 10.0 
 
         color_map = {
-            "tomato": "#ef4444",   # Red
-            "carrot": "#f97316",   # Orange
-            "potato": "#eab308",   # Yellow
-            "eggplant": "#8b5cf6", # Purple
-            "lettuce": "#22c55e",  # Green
+            "tomato": "#ef4444",   
+            "carrot": "#f97316",   
+            "potato": "#eab308",   
+            "eggplant": "#8b5cf6", 
+            "lettuce": "#22c55e",  
         }
-
-        current_x = 0.5
-        current_y = 0.5
-        row_max_h = 0.0
-        gap = 0.2  
 
         for p in self.parcels:
             name = p.get("name", "Parcel")
             crop = p.get("crop", "Unknown")
             date = p.get("planting_date", "Unknown")
-            
-            area_str = str(p.get("area", "1"))
-            area_clean = re.sub(r'[^\d.-]', '', area_str)
+            area_str = str(p.get("area", "0"))
+
+            # --- ADVANCED SPATIAL GEOMETRY ---
+            # Instead of a calculated square, we use exact DB coordinates[cite: 3]
             try:
-                area_val = float(area_clean)
+                x_val = float(p.get("x", 0))
+                y_val = float(p.get("y", 0))
+                w_val = float(p.get("width", 10))
+                h_val = float(p.get("height", 10))
             except ValueError:
-                area_val = 1.0
+                x_val, y_val, w_val, h_val = 0.0, 0.0, 10.0, 10.0
 
-            s = math.sqrt(area_val) * 2.5
+            # Map the exact rectangular corners[cite: 3]
+            x_coords = [x_val, x_val + w_val, x_val + w_val, x_val, x_val]
+            y_coords = [y_val, y_val, y_val + h_val, y_val + h_val, y_val]
 
-            if current_x + s > farm_width - 0.5 and current_x > 0.5:
-                current_x = 0.5
-                current_y += row_max_h + gap
-                row_max_h = 0
-
-            if current_y + s > farm_height - 0.5:
-                farm_height = current_y + s + 2
-
-            x_coords = [current_x, current_x+s, current_x+s, current_x, current_x]
-            y_coords = [current_y, current_y, current_y+s, current_y+s, current_y]
+            # Expand the farm grid boundary if a parcel is placed far out
+            if (x_val + w_val) > max_boundary_x: max_boundary_x = x_val + w_val
+            if (y_val + h_val) > max_boundary_y: max_boundary_y = y_val + h_val
 
             block_color = "#4ade80"
             for k, v in color_map.items():
@@ -157,41 +152,30 @@ class DashboardState(rx.State):
                     block_color = v
                     break
 
-            hover_text = f"<b>{name}</b><br>Crop: {crop}<br>Planted: {date}<br>Area: {area_val} ha"
+            # Update the hover text to show the exact spatial data
+            hover_text = f"<b>{name}</b><br>Crop: {crop}<br>Planted: {date}<br>Area: {area_str}<br>Coordinates: (X: {x_val}, Y: {y_val})<br>Size: {w_val}W x {h_val}H"
 
             fig.add_trace(go.Scatter(
                 x=x_coords, y=y_coords,
                 fill="toself",
                 fillcolor=block_color,
                 mode="lines",
-                line=dict(color="#334155", width=4), 
+                line=dict(color="#334155", width=3), 
                 text=hover_text,
                 hoverinfo="text",
                 name=name
             ))
 
-            current_x += s + gap
-            row_max_h = max(row_max_h, s)
-
-        final_width = max(farm_width, current_x + 0.5)
-        final_height = max(farm_height, current_y + row_max_h + 0.5)
-
+        # Farm Fence Boundary (Dotted line that adjusts to your largest parcel)
         fig.add_shape(
             type="rect",
-            x0=0, y0=0, x1=final_width, y1=final_height,
-            line=dict(color="#1e293b", width=6), 
+            x0=-2, y0=-2, x1=max_boundary_x + 2, y1=max_boundary_y + 2,
+            line=dict(color="#1e293b", width=4, dash="dot"), 
             layer="below"
         )
 
-        if not self.parcels:
-            fig.add_annotation(
-                x=farm_width/2, y=farm_height/2,
-                text="Farm is empty. Add a parcel!",
-                showarrow=False, font=dict(size=16, color="gray")
-            )
-
-        fig.update_xaxes(visible=False, range=[-1, final_width + 1])
-        fig.update_yaxes(visible=False, range=[-1, final_height + 1], scaleanchor="x", scaleratio=1)
+        fig.update_xaxes(visible=False, range=[-4, max_boundary_x + 4])
+        fig.update_yaxes(visible=False, range=[-4, max_boundary_y + 4], scaleanchor="x", scaleratio=1)
         
         fig.update_layout(
             showlegend=False, 
@@ -322,7 +306,8 @@ class DashboardState(rx.State):
         except ValueError:
             return rx.toast.error("Grid coordinates (X, Y, Width, Height) must be numbers.")
 
-        success = create_parcel(
+        # --- UPDATED: Unpack the success boolean AND the message ---
+        success, message = create_parcel(
             name=self.parcel_name, 
             area=self.parcel_area, 
             crop=self.parcel_crop, 
@@ -333,15 +318,18 @@ class DashboardState(rx.State):
             y=y_val,
             w=w_val,
             h=h_val,
-            soil_type=self.new_soil_type,  # NEW
-            irrigation=self.new_irrigation # NEW
+            soil_type=self.new_soil_type,  
+            irrigation=self.new_irrigation 
         )
         
         if success:
             self.show_parcel_modal = False
             self.load_dashboard_data()
-            return rx.toast.success("Parcel added successfully!")
-        return rx.toast.error("Database error while adding parcel.")
+            return rx.toast.success(message)
+            
+        # REQ-2.9: Show the collision warning or DB error
+        return rx.toast.error(message)
+    
     def open_edit_modal(self, p_id: str, p_name: str, p_area: str, p_lat: str, p_lng: str, p_x: str, p_y: str, p_w: str, p_h: str):
         """Loads parcel data into the edit variables and opens the modal."""
         self.edit_parcel_id = str(p_id)
@@ -372,8 +360,8 @@ class DashboardState(rx.State):
         # Ensure we are importing the correct function
         from .db import update_parcel
         
-        # Call the DB update
-        success = update_parcel(
+        # --- UPDATED: Unpack the tuple to catch the collision warning ---
+        success, message = update_parcel(
             str(self.edit_parcel_id),
             str(self.edit_name),
             str(self.edit_area),
@@ -383,8 +371,8 @@ class DashboardState(rx.State):
             y_val,
             w_val,
             h_val,
-            str(self.edit_soil_type), # NEW
-            self.edit_irrigation      # NEW
+            str(self.edit_soil_type), 
+            self.edit_irrigation      
         )
         
         if success:
@@ -392,7 +380,8 @@ class DashboardState(rx.State):
             self.load_dashboard_data()  # Refreshes table AND map data
             return rx.toast.success(f"Parcel '{self.edit_name}' updated!")
         
-        return rx.toast.error("Database error: Could not save edits.")
+        # REQ-2.9: Show the specific collision warning or DB error
+        return rx.toast.error(message)
     
     def toggle_crop(self, crop_id: str, current_status_str: str):
         # FIX: Safely parse the text into a real Python boolean, then flip it
