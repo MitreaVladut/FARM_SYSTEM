@@ -190,8 +190,9 @@ class DashboardState(rx.State):
         return len(self.staff_list) > 0
 
     @rx.var
-    def crop_options(self) -> list[str]:
-        return [c.get("name", "") for c in self.crops]
+    def active_crop_options(self) -> list[str]:
+        """REQ-3.7: Deactivated types no longer appear in new production planning."""
+        return [c.get("name", "") for c in self.crops if str(c.get("active", "true")).lower() == "true"]
 
     @rx.var
     def has_crops(self) -> bool:
@@ -284,6 +285,9 @@ class DashboardState(rx.State):
             return rx.toast.success("Crop type added!")
         return rx.toast.error("Crop already exists.")
     def add_new_parcel(self):
+        if self.parcel_crop and self.parcel_crop != "None":
+            if self.parcel_crop not in self.active_crop_options:
+                return rx.toast.error(f"Security Error: '{self.parcel_crop}' is deactivated and cannot be planned.")
         if not self.parcel_name or not self.parcel_area or not self.parcel_crop or not self.parcel_date:
             return rx.toast.error("All parcel fields are required.")
         
@@ -367,6 +371,29 @@ class DashboardState(rx.State):
             return rx.toast.success(f"Parcel '{self.edit_name}' updated!")
         
         return rx.toast.error("Database error: Could not save edits.")
+    
+    def toggle_crop(self, crop_id: str, current_status_str: str):
+        # FIX: Safely parse the text into a real Python boolean, then flip it
+        is_active = (str(current_status_str) == "true")
+        new_status = not is_active
+        
+        from .db import toggle_crop_status
+        success = toggle_crop_status(crop_id, new_status)
+        if success:
+            self.load_dashboard_data()
+            return rx.toast.success("Crop status updated!")
+        return rx.toast.error("Database error.")
+
+    def toggle_parcel(self, parcel_id: str, current_status_str: str):
+        is_active = (str(current_status_str) == "true")
+        new_status = not is_active
+        
+        from .db import toggle_parcel_status
+        success = toggle_parcel_status(parcel_id, new_status)
+        if success:
+            self.load_dashboard_data()
+            return rx.toast.success("Parcel status updated!")
+        return rx.toast.error("Database error.")
     
     
     # Harvest Form Data
@@ -456,27 +483,52 @@ def stat_card(label: str, value: str, color: str = "grass"):
         width="220px", padding="20px", background_color="white", border_radius="10px", box_shadow="0 4px 6px -1px rgba(0, 0, 0, 0.1)",
     )
 
+def crop_list_row(crop: dict):
+    """A row inside the crop manager to toggle active status."""
+    is_active = (crop["active"] == "true")
+    return rx.hstack(
+        rx.text(crop["name"].to(str), weight="bold"),
+        rx.spacer(),
+        rx.badge(rx.cond(is_active, "Active", "Inactive"), color_scheme=rx.cond(is_active, "green", "red")),
+        rx.button(
+            rx.cond(is_active, "Deactivate", "Activate"),
+            size="1", color_scheme=rx.cond(is_active, "red", "green"), variant="soft",
+            on_click=lambda: DashboardState.toggle_crop(crop["id"].to(str), crop["active"].to(str))
+        ),
+        width="100%", align_items="center", border_bottom="1px solid #e2e8f0", padding_y="8px"
+    )
+
 def add_crop_dialog():
     return rx.dialog.root(
         rx.dialog.content(
             rx.vstack(
-                rx.dialog.title("Add New Crop Type", color="#2d5a27"),
+                rx.dialog.title("🚜 Manage Crop Types", color="#2d5a27"),
+                
+                # --- NEW CROP CREATION ---
+                rx.text("Register a New Crop:", size="2", weight="bold", color="gray"),
                 rx.input(placeholder="Crop Name (e.g., Tomatoes)", on_change=DashboardState.set_crop_name, width="100%"),
                 rx.input(placeholder="Expected Yield (e.g., 18 t/ha)", on_change=DashboardState.set_crop_yield, width="100%"),
-                # --- NEW REQ FIELDS ---
                 rx.input(placeholder="Growth Duration (e.g., 90 days)", on_change=DashboardState.set_crop_duration, width="100%"),
                 rx.input(placeholder="Planting Season (e.g., Spring)", on_change=DashboardState.set_crop_season, width="100%"),
-                rx.text_area(placeholder="Resources Required (e.g., High Water, NPK Fertilizer)", on_change=DashboardState.set_crop_resources, width="100%"),
+                rx.text_area(placeholder="Resources Required (e.g., High Water)", on_change=DashboardState.set_crop_resources, width="100%"),
+                rx.button("Save New Crop", on_click=DashboardState.add_new_crop, color_scheme="grass", width="100%"),
+                
+                rx.divider(margin_y="15px"),
+                
+                # --- EXISTING CROP MANAGEMENT (REQ-3.6) ---
+                rx.text("Active System Crops:", size="2", weight="bold", color="gray"),
+                rx.vstack(
+                    rx.foreach(DashboardState.crops, crop_list_row),
+                    width="100%", max_height="200px", overflow_y="auto" # Scrollable if there are many crops
+                ),
                 
                 rx.hstack(
-                    rx.dialog.close(rx.button("Cancel", variant="soft", color_scheme="gray")),
-                    rx.button("Save Crop", on_click=DashboardState.add_new_crop, color_scheme="grass"),
+                    rx.dialog.close(rx.button("Close Panel", variant="soft", color_scheme="gray")),
                     spacing="3", margin_top="10px", justify="end", width="100%"
                 ),
-            ), max_width="400px",
+            ), max_width="500px",
         ), open=DashboardState.show_crop_modal, on_open_change=DashboardState.set_show_crop_modal,
     )
-
 def add_parcel_dialog():
     return rx.dialog.root(
         rx.dialog.content(
@@ -491,7 +543,7 @@ def add_parcel_dialog():
                 rx.cond(
                     DashboardState.has_crops,
                     rx.select(
-                        DashboardState.crop_options,
+                        DashboardState.active_crop_options,
                         value=DashboardState.parcel_crop,
                         on_change=DashboardState.set_parcel_crop,
                         width="100%", color_scheme="grass"
@@ -534,18 +586,28 @@ def add_parcel_dialog():
     )
 
 def parcel_row(parcel: dict):
+    # 1. Read the active state from the database dictionary
+    is_active = (parcel["active"] == "true")
+    
     return rx.table.row(
         rx.table.row_header_cell(parcel["id"].to(str)[:6].upper() + "..."),
         rx.table.cell(parcel["name"].to(str)),
         rx.table.cell(parcel["area"].to(str)),
         rx.table.cell(parcel["crop"].to(str)),
         rx.table.cell(parcel["planting_date"].to(str)),
-        rx.table.cell(rx.badge(parcel["status"].to(str), color_scheme="blue")),
         rx.table.cell(
-            rx.hstack( # Wrap buttons in hstack
+            # 2. Show "Inactive" (grey) if deactivated, otherwise show normal status (blue)
+            rx.badge(
+                rx.cond(is_active, parcel["status"].to(str), "Inactive"), 
+                color_scheme=rx.cond(is_active, "blue", "gray")
+            )
+        ),
+        rx.table.cell(
+            rx.hstack( 
                 rx.cond(
                     parcel["status"] != "Available",
-                    rx.button("Harvest", size="1", color_scheme="orange", on_click=lambda: DashboardState.open_harvest_modal(parcel["id"].to(str))),
+                    # Disable harvest if inactive
+                    rx.button("Harvest", size="1", color_scheme="orange", disabled=~is_active, on_click=lambda: DashboardState.open_harvest_modal(parcel["id"].to(str))),
                 ),
                 # Add the Edit button
                 rx.button(
@@ -553,6 +615,7 @@ def parcel_row(parcel: dict):
                     size="1", 
                     color_scheme="blue", 
                     variant="soft",
+                    disabled=~is_active, # Disable edit if inactive
                     on_click=lambda: DashboardState.open_edit_modal(
                         parcel["id"], 
                         parcel["name"], 
@@ -562,12 +625,25 @@ def parcel_row(parcel: dict):
                         parcel.get("x", "0"),
                         parcel.get("y", "0"),
                         parcel.get("width", "10"),
-                        parcel.get("height", "10")
+                        parcel.get("height", "10"),
+                        parcel.get("soil_type", ""),    # Phase 1 variable
+                        parcel.get("irrigation", False) # Phase 1 variable
                     )
+                ),
+                # 3. Add the brand new Activation Toggle Button
+                rx.button(
+                    rx.cond(is_active, "Deactivate", "Activate"), 
+                    size="1", 
+                    color_scheme=rx.cond(is_active, "red", "green"), 
+                    variant="surface",
+                    on_click=lambda: DashboardState.toggle_parcel(parcel["id"].to(str), parcel["active"].to(str))
+                
                 ),
                 spacing="2"
             )
         ),
+        # 4. Dim the entire row visually if deactivated
+        opacity=rx.cond(is_active, "1.0", "0.5") 
     )
 
 def add_employee_dialog():

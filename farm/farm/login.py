@@ -15,20 +15,30 @@ class LoginState(rx.State): # pylint: disable=inherit-non-class
     user_name: str = ""
 
     def login(self):
-        """Processes the login attempt and redirects based on role."""
+        """Processes the login attempt, checks for lockouts, and redirects based on role."""
         print(f"🔍 1. Încercare de logare pentru: '{self.email}'")
         self.error_message = "" 
         
         # Apelăm baza de date
-        user = Database.verify_user(self.email, self.password)
-        print(f"🔍 2. Răspuns de la baza de date: {user}")
+        user_result = Database.verify_user(self.email, self.password)
+        print(f"🔍 2. Răspuns de la baza de date: {user_result}")
         
-        if user:
-            print(f"✅ 3. Autentificare reușită! Rol: {user.get('role')}. Pregătesc redirectul...")
+        # 3. Handle the new lockout and error states
+        if user_result == "LOCKED":
+            print("❌ 3. Cont blocat temporar (3 încercări eșuate).")
+            self.error_message = "Account temporarily blocked due to 3 failed attempts. Try again in 15 minutes."
+            
+        elif user_result == "WRONG_PASSWORD" or user_result is None:
+            print("❌ 3. Autentificare eșuată. User inexistent sau parolă greșită.")
+            self.error_message = "Invalid email or password."
+            
+        else:
+            # 4. Success logic (user_result is the dictionary)
+            print(f"✅ 3. Autentificare reușită! Rol: {user_result.get('role')}. Pregătesc redirectul...")
             self.is_authenticated = True
-            self.current_user_id = user["_id"]
-            self.user_role = user.get("role", "Customer")
-            self.user_name = user.get("name", "User")
+            self.current_user_id = user_result["_id"]
+            self.user_role = user_result.get("role", "Customer")
+            self.user_name = user_result.get("name", "User")
             
             self.password = "" # Curățăm parola
             
@@ -41,9 +51,7 @@ class LoginState(rx.State): # pylint: disable=inherit-non-class
             else:
                 print("🚀 4. Trimit user-ul la /")
                 return rx.redirect("/")
-        else:
-            print("❌ 3. Autentificare eșuată. User inexistent sau parolă greșită.")
-            self.error_message = "Invalid email or password."
+
         
     def logout(self):
         """Clears the session and returns to storefront."""

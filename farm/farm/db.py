@@ -34,9 +34,11 @@ class Database:
                 raise e
         return cls._db
     
+    
     @classmethod
-    def verify_user(cls, email: str, password: str) -> dict | None:
-        """Verifies user credentials against the database using bcrypt."""
+    def verify_user(cls, email: str, password: str) -> dict | str | None:
+        """REQ-1.3: Verifies user with a 3-strike temporary lockout system."""
+        import datetime
         try:
             db = cls.get_db()
             user = db.users.find_one({"email": email})
@@ -44,18 +46,37 @@ class Database:
             if not user:
                 return None
                 
-            # Verify the hashed password
-            # Note: Expects the database password to be stored as a bcrypt hash string
+            # 1. Check if the account is currently locked out
+            if user.get("lockout_until"):
+                if datetime.datetime.now() < user["lockout_until"]:
+                    return "LOCKED" # Signal the frontend that it's blocked
+                else:
+                    # Time has passed, reset the lock
+                    db.users.update_one({"email": email}, {"$set": {"failed_attempts": 0, "lockout_until": None}})
+
+            # 2. Verify Password
             stored_password = user.get("password", "")
             if bcrypt.checkpw(password.encode('utf-8'), stored_password.encode('utf-8')):
-                # Convert ObjectId to string for Reflex state serialization
+                # Success! Reset failed attempts
+                db.users.update_one({"email": email}, {"$set": {"failed_attempts": 0, "lockout_until": None}})
                 user["_id"] = str(user["_id"])
                 return user
+            else:
+                # 3. Failed Attempt Logic
+                attempts = user.get("failed_attempts", 0) + 1
+                update_data = {"failed_attempts": attempts}
                 
-            return None
+                if attempts >= 3:
+                    # Lock the account for 15 minutes
+                    update_data["lockout_until"] = datetime.datetime.now() + datetime.timedelta(minutes=15)
+                    
+                db.users.update_one({"email": email}, {"$set": update_data})
+                return "WRONG_PASSWORD"
+                
         except Exception as e:
             print(f"Login verification error: {e}")
             return None
+    
     
     @classmethod
     def create_user(cls, email: str, password: str, name: str, role: str = "Customer") -> bool:
@@ -162,6 +183,7 @@ def get_all_parcels():
     parcels = list(db.parcels.find())
     for parcel in parcels:
         parcel["id"] = str(parcel.pop("_id"))
+        parcel["active"] = "true" if parcel.get("active", True) else "false"
     return parcels
 
 # --- STAFF MANAGEMENT FUNCTIONS ---
@@ -212,6 +234,7 @@ def get_all_crops() -> list:
         name = c.get("name", "Unknown")
         if name not in seen_names:
             c["id"] = str(c.pop("_id"))
+            c["active"] = "true" if c.get("active", True) else "false"
             combined_crops.append(c)
             seen_names.add(name)
 
@@ -222,7 +245,8 @@ def get_all_crops() -> list:
             combined_crops.append({
                 "id": str(item.get("_id", "auto")), 
                 "name": name, 
-                "yield_per_ha": "Auto-imported from store"
+                "yield_per_ha": "Auto-imported from store",
+                "active": "true" if item.get("active", True) else "false"
             })
             seen_names.add(name)
 
@@ -454,4 +478,49 @@ def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: i
         return True
     except Exception as e:
         print(f"Error updating parcel: {e}")
+        return False
+    
+def cancel_customer_order(order_id: str) -> bool:
+    """REQ-7.7: Allows a customer to reject and cancel their order."""
+    try:
+        db = Database.get_db()
+        # We ONLY allow cancellation if the status is "Created"
+        # If staff has started processing it, they must call the farm.
+        result = db.orders.update_one(
+            {"_id": ObjectId(order_id), "status": "Created"}, 
+            {"$set": {"status": "Cancelled"}}
+        )
+        # Returns True if an order was actually updated
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Cancel error: {e}")
+        return False
+    
+def toggle_crop_status(crop_id: str, new_status: bool) -> bool:
+    """REQ-3.6: Activate or deactivate a crop type."""
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        
+        # 1. Try updating in the explicit crops table
+        result = db.crops.update_one({"_id": ObjectId(crop_id)}, {"$set": {"active": new_status}})
+        
+        # 2. If it wasn't found, it must be an auto-imported inventory item!
+        if result.matched_count == 0:
+            db.inventory.update_one({"_id": ObjectId(crop_id)}, {"$set": {"active": new_status}})
+            
+        return True
+    except Exception as e:
+        print(f"Error toggling crop: {e}")
+        return False
+
+def toggle_parcel_status(parcel_id: str, new_status: bool) -> bool:
+    """REQ-2.1: Activate or deactivate a parcel."""
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        db.parcels.update_one({"_id": ObjectId(parcel_id)}, {"$set": {"active": new_status}})
+        return True
+    except Exception as e:
+        print(f"Error toggling parcel: {e}")
         return False
