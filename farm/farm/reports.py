@@ -24,7 +24,7 @@ class ReportState(rx.State):  # pylint: disable=inherit-non-class
     total_revenue: str = "0.00 RON"
     crop_distribution: list[dict] = []
     production_history: list[dict] = [] # Added for REQ-9.2
-
+    search_query: str = ""
     def load_financial_report(self):
         """Loads financials, crop distribution, and production history."""
         try:
@@ -69,6 +69,20 @@ class ReportState(rx.State):  # pylint: disable=inherit-non-class
             
         except Exception as e:
             print(f"Error loading reports: {e}")
+    @rx.var
+    def filtered_production_history(self) -> list[dict]:
+        """REQ-8.3 & REQ-8.6: Case insensitive search by crop type."""
+        if not self.search_query:
+            return self.production_history
+        
+        query = self.search_query.lower().strip()
+        # Sanitize basic characters
+        query = "".join(e for e in query if e.isalnum() or e.isspace())
+        
+        return [
+            r for r in self.production_history 
+            if query in str(r.get("crop", "")).lower()
+        ]
 
 
 def report_row(order: dict):
@@ -167,24 +181,42 @@ def reports_page():
                 variant="surface",
             ),
 
-            # Production History Table (REQ-9.2)
-            rx.heading("Production History", size="5", margin_top="30px", color="#2d5a27"),
-            rx.table.root(
-                rx.table.header(
-                    rx.table.row(
-                        rx.table.column_header_cell("Harvest Date"),
-                        rx.table.column_header_cell("Parcel Name"),
-                        rx.table.column_header_cell("Crop Type"),
-                        rx.table.column_header_cell("Actual Yield"),
-                        rx.table.column_header_cell("Quality Notes"),
-                        rx.table.column_header_cell("Harvested By"),
-                        style={"background_color": "#2d5a27", "color": "white"}
-                    ),
+            # Production History Table (REQ-9.2 & REQ-8.3)
+            rx.hstack(
+                rx.heading("Production History", size="5", color="#2d5a27"),
+                rx.spacer(),
+                rx.input(
+                    placeholder="🔍 Search by crop type...", 
+                    on_change=ReportState.set_search_query,
+                    width="300px"
                 ),
-                rx.table.body(rx.foreach(ReportState.production_history, history_row)),
-                width="100%", 
-                variant="surface", 
-                box_shadow="0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                width="100%", margin_top="30px"
+            ),
+            
+            rx.cond(
+                ReportState.filtered_production_history,
+                rx.table.root(
+                    rx.table.header(
+                        rx.table.row(
+                            rx.table.column_header_cell("Harvest Date"),
+                            rx.table.column_header_cell("Parcel Name"),
+                            rx.table.column_header_cell("Crop Type"),
+                            rx.table.column_header_cell("Actual Yield"),
+                            rx.table.column_header_cell("Quality Notes"),
+                            rx.table.column_header_cell("Harvested By"),
+                            style={"background_color": "#2d5a27", "color": "white"}
+                        ),
+                    ),
+                    rx.table.body(rx.foreach(ReportState.filtered_production_history, history_row)),
+                    width="100%", 
+                    variant="surface", 
+                    box_shadow="0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                ),
+                rx.cond(
+                    ReportState.search_query != "",
+                    rx.text("Ups we don't grow that", color="red", weight="bold"), # REQ-8.8
+                    rx.text("No production history found.", color="gray")
+                )
             ),
             
             # Navigation

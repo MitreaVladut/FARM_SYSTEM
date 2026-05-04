@@ -3,11 +3,12 @@ import reflex as rx
 from .db import get_all_orders, update_order_status, delete_order
 from typing import List, Dict, Any
 from farm.login import LoginState
+from .store import StoreState
 
 class StaffOrderState(rx.State):
     orders: list[dict] = []
     is_loading: bool = True
-
+    search_query: str = ""
     async def check_permissions(self):
         self.is_loading = True
         login_state = await self.get_state(LoginState)
@@ -39,6 +40,20 @@ class StaffOrderState(rx.State):
         new_status = status_flow.get(current_status, "Pending")
         update_order_status(order_id, new_status)
         self.fetch_orders()
+
+    @rx.var
+    def filtered_orders(self) -> list[dict]:
+        """REQ-8.5 & REQ-8.6: Case insensitive search by status."""
+        if not self.search_query:
+            return self.orders
+        
+        query = self.search_query.lower().strip()
+        query = "".join(e for e in query if e.isalnum() or e.isspace())
+        
+        return [
+            o for o in self.orders 
+            if query in str(o.get("status", "")).lower()
+        ]
 
 def staff_navbar():
     """Bara de navigare superioară dedicată paginilor de Staff."""
@@ -129,33 +144,32 @@ def staff_orders_page():
             LoginState.is_authenticated & ( (LoginState.user_role == "Staff") | (LoginState.user_role == "Admin") ),
             
             # --- CONȚINUTUL VIZIBIL ---
+            # --- THE ACTUAL STAFF CONTENT ---
             rx.vstack(
-                staff_navbar(), # Adăugăm noul header cu logo
-                
-                rx.vstack(
-                    rx.hstack(
-                        rx.heading("Procesare Comenzi", size="8", color="#2d5a27"), # Contrast fixat
-                        rx.spacer(),
-                        rx.link(
-                            rx.button("← Înapoi la Panou", variant="outline", color_scheme="gray"), 
-                            href="/staff"
-                        ),
-                        width="100%",
-                        align_items="center",
-                        margin_bottom="20px"
+                rx.hstack(
+                    rx.heading("Staff Dashboard - Orders", size="7"),
+                    rx.spacer(),
+                    # Add the search bar here
+                    rx.input(
+                        placeholder="🔍 Search orders by status...", 
+                        on_change=StaffOrderState.set_search_query,
+                        width="300px"
                     ),
-                    
-                    rx.grid(
-                        rx.foreach(StaffOrderState.orders, order_card),
-                        columns="3",
-                        spacing="5",
-                        width="100%",
-                    ),
-                    padding="40px",
+                    rx.button("Logout", on_click=StoreState.logout, color_scheme="red"),
                     width="100%",
-                    max_width="1400px",
-                    margin="0 auto"
                 ),
+                rx.cond(
+                    StaffOrderState.filtered_orders,
+                    rx.grid(
+                        rx.foreach(StaffOrderState.filtered_orders, order_card),
+                        columns="3",
+                        spacing="4",
+                        width="100%",
+                    ),
+                    rx.text("Ups we don't grow that", color="red", weight="bold", margin_top="20px") # REQ-8.8
+                ),
+                padding="40px",
+                width="100%",
             ),
             
             # --- ECRAN DE ÎNCĂRCARE ---

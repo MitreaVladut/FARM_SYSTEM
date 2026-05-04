@@ -33,6 +33,41 @@ class DashboardState(rx.State):
     parcel_crop: str = ""
     parcel_date: str = ""
     parcels: list[dict] = []
+    new_soil_type: str = ""
+    new_irrigation: bool = False
+    crop_duration: str = ""
+    crop_season: str = ""
+    crop_resources: str = ""
+
+
+    search_query: str = ""
+
+    # Variables for the Expansion Modal
+    show_expand_modal: bool = False
+    expand_target_id: str = ""
+    expand_new_width: str = ""
+    expand_new_height: str = ""
+
+    new_lat: str = ""
+    new_lng: str = ""
+    new_x: str = "0"
+    new_y: str = "0"
+    new_width: str = "10"
+    new_height: str = "10"
+
+    show_edit_modal: bool = False
+    edit_parcel_id: str = ""
+    edit_name: str = ""
+    edit_area: str = ""
+    edit_lat: str = ""
+    edit_lng: str = ""
+    edit_x: str = "0"
+    edit_y: str = "0"
+    edit_width: str = "10"
+    edit_height: str = "10"
+    edit_soil_type: str = ""
+    edit_irrigation: bool = False
+    
 
     def load_dashboard_data(self):
         try:
@@ -199,6 +234,13 @@ class DashboardState(rx.State):
         self.parcel_name = ""
         self.parcel_area = ""
         self.parcel_date = ""
+        # Reset coordinates when opening modal
+        self.new_lat = ""
+        self.new_lng = ""
+        self.new_x = "0"
+        self.new_y = "0"
+        self.new_width = "10"
+        self.new_height = "10"
         self.load_dashboard_data()
         self.show_parcel_modal = True
 
@@ -226,23 +268,47 @@ class DashboardState(rx.State):
     # --- CROP & PARCEL ACTIONS ---
     def add_new_crop(self):
         if not self.crop_name or not self.crop_yield:
-            return rx.toast.error("All crop fields are required.")
-        success = create_crop(self.crop_name, self.crop_yield)
+            return rx.toast.error("Name and Yield are required.")
+            
+        from .db import create_crop
+        success = create_crop(
+            self.crop_name, 
+            self.crop_yield, 
+            self.crop_duration, 
+            self.crop_season, 
+            self.crop_resources
+        )
         if success:
             self.show_crop_modal = False
             self.load_dashboard_data()
             return rx.toast.success("Crop type added!")
         return rx.toast.error("Crop already exists.")
-
     def add_new_parcel(self):
         if not self.parcel_name or not self.parcel_area or not self.parcel_crop or not self.parcel_date:
             return rx.toast.error("All parcel fields are required.")
         
+        # Ensure we pass integers for the grid coordinates
+        try:
+            x_val = int(self.new_x) if self.new_x else 0
+            y_val = int(self.new_y) if self.new_y else 0
+            w_val = int(self.new_width) if self.new_width else 10
+            h_val = int(self.new_height) if self.new_height else 10
+        except ValueError:
+            return rx.toast.error("Grid coordinates (X, Y, Width, Height) must be numbers.")
+
         success = create_parcel(
             name=self.parcel_name, 
             area=self.parcel_area, 
             crop=self.parcel_crop, 
-            planting_date=self.parcel_date
+            planting_date=self.parcel_date,
+            lat=self.new_lat,
+            lng=self.new_lng,
+            x=x_val,
+            y=y_val,
+            w=w_val,
+            h=h_val,
+            soil_type=self.new_soil_type,  # NEW
+            irrigation=self.new_irrigation # NEW
         )
         
         if success:
@@ -250,6 +316,57 @@ class DashboardState(rx.State):
             self.load_dashboard_data()
             return rx.toast.success("Parcel added successfully!")
         return rx.toast.error("Database error while adding parcel.")
+    def open_edit_modal(self, p_id: str, p_name: str, p_area: str, p_lat: str, p_lng: str, p_x: str, p_y: str, p_w: str, p_h: str):
+        """Loads parcel data into the edit variables and opens the modal."""
+        self.edit_parcel_id = str(p_id)
+        self.edit_name = str(p_name)
+        self.edit_area = str(p_area)
+        self.edit_lat = str(p_lat) if p_lat and p_lat != "None" else ""
+        self.edit_lng = str(p_lng) if p_lng and p_lng != "None" else ""
+        self.edit_x = str(p_x) if p_x and p_x != "None" else "0"
+        self.edit_y = str(p_y) if p_y and p_y != "None" else "0"
+        self.edit_width = str(p_w) if p_w and p_w != "None" else "10"
+        self.edit_height = str(p_h) if p_h and p_h != "None" else "10"
+        self.show_edit_modal = True
+
+    def save_parcel_edits(self):
+        """Calls the DB function to update the parcel and coordinates."""
+        if not self.edit_name or not self.edit_area:
+            return rx.toast.error("Name and Area are required.")
+            
+        # Robust conversion: Default to 0/10 if empty, handle strings safely
+        try:
+            x_val = int(self.edit_x) if str(self.edit_x).strip() else 0
+            y_val = int(self.edit_y) if str(self.edit_y).strip() else 0
+            w_val = int(self.edit_width) if str(self.edit_width).strip() else 10
+            h_val = int(self.edit_height) if str(self.edit_height).strip() else 10
+        except ValueError:
+            return rx.toast.error("Grid coordinates (X, Y, Width, Height) must be numbers.")
+
+        # Ensure we are importing the correct function
+        from .db import update_parcel
+        
+        # Call the DB update
+        success = update_parcel(
+            str(self.edit_parcel_id),
+            str(self.edit_name),
+            str(self.edit_area),
+            str(self.edit_lat),
+            str(self.edit_lng),
+            x_val,
+            y_val,
+            w_val,
+            h_val,
+            str(self.edit_soil_type), # NEW
+            self.edit_irrigation      # NEW
+        )
+        
+        if success:
+            self.show_edit_modal = False
+            self.load_dashboard_data()  # Refreshes table AND map data
+            return rx.toast.success(f"Parcel '{self.edit_name}' updated!")
+        
+        return rx.toast.error("Database error: Could not save edits.")
     
     
     # Harvest Form Data
@@ -284,6 +401,48 @@ class DashboardState(rx.State):
             self.load_dashboard_data()
             return rx.toast.success("Parcel harvested and inventory updated!")
         return rx.toast.error("Database error.")
+    
+    @rx.var
+    def filtered_parcels(self) -> list[dict]:
+        if not self.search_query:
+            return self.parcels
+            
+        query = self.search_query.lower().strip()
+        query = "".join(e for e in query if e.isalnum() or e.isspace())
+        
+        return [
+            p for p in self.parcels 
+            if query in str(p.get("name", "")).lower() or query in str(p.get("status", "")).lower()
+        ]
+    
+    def open_expand_modal(self, parcel_id: str, current_w: int, current_h: int):
+        self.expand_target_id = parcel_id
+        self.expand_new_width = str(current_w)
+        self.expand_new_height = str(current_h)
+        self.show_expand_modal = True
+
+    def close_expand_modal(self):
+        self.show_expand_modal = False
+
+    def confirm_expansion(self):
+        # Convert inputs to integers safely
+        try:
+            w = int(self.expand_new_width)
+            h = int(self.expand_new_height)
+        except ValueError:
+            return rx.toast.error("Width and height must be numbers!")
+
+        # Call the DB function we just made
+        from .db import expand_parcel # ensure this is imported
+        success, message = expand_parcel(self.expand_target_id, w, h)
+        
+        if success:
+            self.show_expand_modal = False
+            self.load_parcels() # Refresh your list
+            return rx.toast.success(message)
+        else:
+            # THIS triggers the exact red error message from your requirements
+            return rx.toast.error(message)
 
 # --- UI COMPONENTS ---
 
@@ -302,9 +461,13 @@ def add_crop_dialog():
         rx.dialog.content(
             rx.vstack(
                 rx.dialog.title("Add New Crop Type", color="#2d5a27"),
-                rx.text("Define a new crop species for your farm.", size="2", color="gray"),
                 rx.input(placeholder="Crop Name (e.g., Tomatoes)", on_change=DashboardState.set_crop_name, width="100%"),
                 rx.input(placeholder="Expected Yield (e.g., 18 t/ha)", on_change=DashboardState.set_crop_yield, width="100%"),
+                # --- NEW REQ FIELDS ---
+                rx.input(placeholder="Growth Duration (e.g., 90 days)", on_change=DashboardState.set_crop_duration, width="100%"),
+                rx.input(placeholder="Planting Season (e.g., Spring)", on_change=DashboardState.set_crop_season, width="100%"),
+                rx.text_area(placeholder="Resources Required (e.g., High Water, NPK Fertilizer)", on_change=DashboardState.set_crop_resources, width="100%"),
+                
                 rx.hstack(
                     rx.dialog.close(rx.button("Cancel", variant="soft", color_scheme="gray")),
                     rx.button("Save Crop", on_click=DashboardState.add_new_crop, color_scheme="grass"),
@@ -320,6 +483,8 @@ def add_parcel_dialog():
             rx.vstack(
                 rx.dialog.title("Add New Parcel", color="#2d5a27"),
                 rx.text("Register a new land parcel to the database.", size="2", color="gray"),
+                
+                # Basic Info
                 rx.input(placeholder="Parcel Name (e.g., North Field 1)", on_change=DashboardState.set_parcel_name, width="100%"),
                 rx.input(placeholder="Area in Hectares (e.g., 4.2 ha)", on_change=DashboardState.set_parcel_area, width="100%"),
                 
@@ -337,12 +502,34 @@ def add_parcel_dialog():
                 rx.text("Planting Date:", size="2", color="gray", width="100%", text_align="left"),
                 rx.input(type="date", on_change=DashboardState.set_parcel_date, width="100%"),
                 
+                rx.divider(),
+                rx.text("Location & Size Coordinates:", size="2", color="gray", width="100%", text_align="left"),
+                rx.text("Environment & Soil:", size="2", color="gray", width="100%", text_align="left"),
+                rx.input(placeholder="Soil Type (e.g., Clay, Sandy)", on_change=DashboardState.set_new_soil_type, width="100%"),
+                rx.checkbox("Irrigation System Available", on_change=DashboardState.set_new_irrigation, color_scheme="blue", margin_bottom="10px"),
+
+                # Geographic Coordinates
+                rx.hstack(
+                    rx.input(placeholder="Latitude (e.g., 44.3202)", on_change=DashboardState.set_new_lat, width="100%"),
+                    rx.input(placeholder="Longitude (e.g., 23.7949)", on_change=DashboardState.set_new_lng, width="100%"),
+                    width="100%"
+                ),
+                
+                # Grid Coordinates (For Collision/Expansion)
+                rx.hstack(
+                    rx.input(placeholder="Grid X", on_change=DashboardState.set_new_x, width="25%"),
+                    rx.input(placeholder="Grid Y", on_change=DashboardState.set_new_y, width="25%"),
+                    rx.input(placeholder="Width", on_change=DashboardState.set_new_width, width="25%"),
+                    rx.input(placeholder="Height", on_change=DashboardState.set_new_height, width="25%"),
+                    width="100%"
+                ),
+                
                 rx.hstack(
                     rx.dialog.close(rx.button("Cancel", variant="soft", color_scheme="gray")),
                     rx.button("Save Parcel", on_click=DashboardState.add_new_parcel, color_scheme="grass", disabled=~DashboardState.has_crops),
                     spacing="3", margin_top="10px", justify="end", width="100%"
                 ),
-            ), max_width="400px",
+            ), max_width="450px",
         ), open=DashboardState.show_parcel_modal, on_open_change=DashboardState.set_show_parcel_modal,
     )
 
@@ -355,10 +542,30 @@ def parcel_row(parcel: dict):
         rx.table.cell(parcel["planting_date"].to(str)),
         rx.table.cell(rx.badge(parcel["status"].to(str), color_scheme="blue")),
         rx.table.cell(
-            rx.cond(
-                parcel["status"] != "Available",
-                rx.button("Harvest", size="1", color_scheme="orange", on_click=lambda: DashboardState.open_harvest_modal(parcel["id"].to(str))),
-                rx.button("Details", size="1", color_scheme="grass")
+            rx.hstack( # Wrap buttons in hstack
+                rx.cond(
+                    parcel["status"] != "Available",
+                    rx.button("Harvest", size="1", color_scheme="orange", on_click=lambda: DashboardState.open_harvest_modal(parcel["id"].to(str))),
+                ),
+                # Add the Edit button
+                rx.button(
+                    "Edit", 
+                    size="1", 
+                    color_scheme="blue", 
+                    variant="soft",
+                    on_click=lambda: DashboardState.open_edit_modal(
+                        parcel["id"], 
+                        parcel["name"], 
+                        parcel["area"],
+                        parcel.get("latitude", ""),
+                        parcel.get("longitude", ""),
+                        parcel.get("x", "0"),
+                        parcel.get("y", "0"),
+                        parcel.get("width", "10"),
+                        parcel.get("height", "10")
+                    )
+                ),
+                spacing="2"
             )
         ),
     )
@@ -425,6 +632,7 @@ def dashboard_page():
         add_crop_dialog(),
         add_parcel_dialog(),
         harvest_dialog(),
+        edit_parcel_dialog(),
 
         rx.hstack(
             rx.hstack(
@@ -459,6 +667,7 @@ def dashboard_page():
                 rx.button("Generate Report", color_scheme="green", size="2", on_click=rx.redirect("/admin/reports")),
                 rx.button("+ Add Employee", color_scheme="blue", size="2", on_click=DashboardState.open_add_modal),
                 rx.button("- Remove Employee", color_scheme="red", size="2", on_click=DashboardState.open_remove_modal),
+                rx.button("System Backup", color_scheme="red", size="2", on_click=rx.redirect("/admin/backup")),
                 spacing="3", padding_y="10px",
             ),
 
@@ -506,4 +715,69 @@ def dashboard_page():
         on_mount=DashboardState.load_dashboard_data,
         background_color="#f8fafc",
         min_height="100vh",
+    )
+
+def edit_parcel_dialog():
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.vstack(
+                rx.dialog.title("Edit Parcel Details", color="#2d5a27"),
+                rx.text("Update basic info and location data.", size="2", color="gray"),
+                
+                # Basic Info
+                rx.text("Parcel Name", size="1", color="gray", width="100%", text_align="left"),
+                rx.input(value=DashboardState.edit_name, on_change=DashboardState.set_edit_name, width="100%"),
+                
+                rx.text("Area (ha)", size="1", color="gray", width="100%", text_align="left"),
+                rx.input(value=DashboardState.edit_area, on_change=DashboardState.set_edit_area, width="100%"),
+                
+                rx.divider(margin_y="10px"),
+                rx.text("Location & Size Coordinates:", size="2", color="gray", width="100%", text_align="left"),
+                rx.text("Environment & Soil:", size="2", color="gray", width="100%", text_align="left"),
+                rx.input(placeholder="Soil Type", value=DashboardState.edit_soil_type, on_change=DashboardState.set_edit_soil_type, width="100%"),
+                rx.checkbox("Irrigation System Available", checked=DashboardState.edit_irrigation, on_change=DashboardState.set_edit_irrigation, color_scheme="blue", margin_bottom="10px"),
+                
+                # Geographic Coordinates
+                rx.hstack(
+                    rx.vstack(
+                        rx.text("Lat", size="1", color="gray"),
+                        rx.input(value=DashboardState.edit_lat, on_change=DashboardState.set_edit_lat, width="100%"),
+                        width="100%"
+                    ),
+                    rx.vstack(
+                        rx.text("Lng", size="1", color="gray"),
+                        rx.input(value=DashboardState.edit_lng, on_change=DashboardState.set_edit_lng, width="100%"),
+                        width="100%"
+                    ),
+                    width="100%"
+                ),
+                
+                # Grid Coordinates
+                rx.hstack(
+                    rx.vstack(
+                        rx.text("X", size="1", color="gray"),
+                        rx.input(value=DashboardState.edit_x, on_change=DashboardState.set_edit_x, width="100%"),
+                    ),
+                    rx.vstack(
+                        rx.text("Y", size="1", color="gray"),
+                        rx.input(value=DashboardState.edit_y, on_change=DashboardState.set_edit_y, width="100%"),
+                    ),
+                    rx.vstack(
+                        rx.text("W", size="1", color="gray"),
+                        rx.input(value=DashboardState.edit_width, on_change=DashboardState.set_edit_width, width="100%"),
+                    ),
+                    rx.vstack(
+                        rx.text("H", size="1", color="gray"),
+                        rx.input(value=DashboardState.edit_height, on_change=DashboardState.set_edit_height, width="100%"),
+                    ),
+                    width="100%"
+                ),
+                
+                rx.hstack(
+                    rx.dialog.close(rx.button("Cancel", variant="soft", color_scheme="gray")),
+                    rx.button("Save Changes", on_click=DashboardState.save_parcel_edits, color_scheme="blue"),
+                    spacing="3", margin_top="15px", justify="end", width="100%"
+                ),
+            ), max_width="450px",
+        ), open=DashboardState.show_edit_modal, on_open_change=DashboardState.set_show_edit_modal,
     )

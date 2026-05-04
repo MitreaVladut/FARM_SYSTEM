@@ -2,6 +2,7 @@
 
 import os
 import bcrypt
+import json
 import datetime
 from dotenv import load_dotenv, find_dotenv
 from pymongo import MongoClient
@@ -181,14 +182,19 @@ def delete_user(user_id: str):
 
 # --- PARCELS & CROPS FUNCTIONS ---
 
-def create_crop(name: str, yield_per_ha: str) -> bool:
-    """Saves a new crop type to the database."""
+def create_crop(name: str, yield_per_ha: str, growth_duration: str, planting_season: str, resources: str) -> bool:
+    """Saves a new crop type to the database (Updated with REQ-3.3, 3.4, 3.8)."""
     try:
         db = Database.get_db()
-        # Prevent duplicate crop names
         if db.crops.find_one({"name": name}):
             return False
-        db.crops.insert_one({"name": name, "yield_per_ha": yield_per_ha})
+        db.crops.insert_one({
+            "name": name, 
+            "yield_per_ha": yield_per_ha,          # REQ-3.5 (Already existed)
+            "growth_duration": growth_duration,    # REQ-3.3
+            "planting_season": planting_season,    # REQ-3.4
+            "resources": resources                 # REQ-3.8
+        })
         return True
     except Exception as e:
         print(f"Error creating crop: {e}")
@@ -223,29 +229,33 @@ def get_all_crops() -> list:
     return combined_crops
 
 # Note the added latitude and longitude in the arguments here!
-def create_parcel(name: str, area: str, crop: str, planting_date: str) -> bool:
-    """Saves a new land parcel to the database."""
+def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str, lng: str, x: int, y: int, w: int, h: int, soil_type: str, irrigation: bool) -> bool:
+    """Saves a new land parcel to the database (Updated with REQ-2.2 & 2.3)."""
     try:
         db = Database.get_db()
+        status = "Available" if crop == "None" or not crop else "Planned"
+        
         db.parcels.insert_one({
             "name": name,
             "area": area,
             "crop": crop,
             "planting_date": planting_date,
-            "status": "Planned" 
+            "status": status,
+            "latitude": lat,
+            "longitude": lng,
+            "x": int(x),
+            "y": int(y),
+            "width": int(w),
+            "height": int(h),
+            "soil_type": soil_type,      # REQ-2.2
+            "irrigation": irrigation     # REQ-2.3
         })
         return True
     except Exception as e:
         print(f"Error creating parcel: {e}")
         return False
 
-def get_all_parcels() -> list:
-    """Fetches all land parcels."""
-    db = Database.get_db()
-    parcels = list(db.parcels.find())
-    for p in parcels:
-        p["id"] = str(p.pop("_id"))
-    return parcels
+
 
 def harvest_parcel(parcel_id: str, actual_yield: float, quality_notes: str, user_name: str) -> bool:
     """Feature 4: Production Cycle Tracking with Smart Inventory Matching"""
@@ -326,3 +336,122 @@ def get_all_production_records() -> list:
     except Exception as e:
         print(f"Error fetching production records: {e}")
         return []
+
+
+def export_full_database() -> str:
+    """REQ-10.1, 10.2: Exports complete configuration and records."""
+    try:
+        db = Database.get_db()
+        # We exclude '_id' because MongoDB generates new ones automatically 
+        # and we don't want conflicts when importing.
+        backup_data = {
+            "parcels": list(db.parcels.find({}, {"_id": 0})),
+            "crops": list(db.crop_types.find({}, {"_id": 0})) if "crop_types" in db.list_collection_names() else [],
+            "inventory": list(db.inventory.find({}, {"_id": 0})),
+            "production_records": list(db.production_records.find({}, {"_id": 0})),
+            "orders": list(db.orders.find({}, {"_id": 0}))
+        }
+        # Format as a pretty JSON string
+        return json.dumps(backup_data, indent=4)
+    except Exception as e:
+        print(f"Export error: {e}")
+        return ""
+
+def restore_database(json_string: str) -> bool:
+    """REQ-10.6, 10.7: Import and validate the backup file."""
+    try:
+        data = json.loads(json_string)
+        
+        # REQ-10.7: File Validation. Ensure the file has the correct structure.
+        if not isinstance(data, dict) or "parcels" not in data or "production_records" not in data:
+            print("Validation failed: Missing required core collections.")
+            return False
+            
+        db = Database.get_db()
+        
+        # Danger Zone: Clear existing data before restoring
+        # We DO NOT clear the 'users' table so admins don't lock themselves out!
+        for collection_name in ["parcels", "crop_types", "inventory", "production_records", "orders"]:
+            if collection_name in data and isinstance(data[collection_name], list):
+                db[collection_name].delete_many({}) # Wipe current data
+                if data[collection_name]:           # If backup has data, insert it
+                    db[collection_name].insert_many(data[collection_name])
+                    
+        return True
+    except json.JSONDecodeError:
+        print("Validation failed: Not a valid JSON file.")
+        return False
+    except Exception as e:
+        print(f"Restore error: {e}")
+        return False
+    
+def is_overlapping(rect1: dict, rect2: dict) -> bool:
+    """Mathematical check if two rectangles overlap on a grid."""
+    # We assume each dict has x, y, width, and height
+    return (
+        rect1.get('x', 0) < rect2.get('x', 0) + rect2.get('width', 0) and
+        rect1.get('x', 0) + rect1.get('width', 0) > rect2.get('x', 0) and
+        rect1.get('y', 0) < rect2.get('y', 0) + rect2.get('height', 0) and
+        rect1.get('y', 0) + rect1.get('height', 0) > rect2.get('y', 0)
+    )
+
+def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool, str]:
+    """Attempts to expand a parcel, returns (Success, Message)."""
+    try:
+        db = Database.get_db()
+        
+        # 1. Get the parcel we want to expand
+        target = db.parcels.find_one({"_id": ObjectId(parcel_id)})
+        if not target:
+            return False, "Parcel not found."
+            
+        # Create a temporary dictionary of what the parcel WOULD look like
+        proposed_shape = {
+            "x": target.get("x", 0),
+            "y": target.get("y", 0),
+            "width": new_width,
+            "height": new_height
+        }
+        
+        # 2. Get all OTHER parcels
+        other_parcels = list(db.parcels.find({"_id": {"$ne": ObjectId(parcel_id)}}))
+        
+        # 3. Check for collisions
+        for other in other_parcels:
+            if is_overlapping(proposed_shape, other):
+                return False, f"You can't expand this parcel, it would overlap with {other.get('name', 'another parcel')}!"
+                
+        # 4. If no overlaps, save the new size!
+        db.parcels.update_one(
+            {"_id": ObjectId(parcel_id)},
+            {"$set": {"width": new_width, "height": new_height}}
+        )
+        return True, "Parcel expanded successfully!"
+        
+    except Exception as e:
+        print(f"Expansion error: {e}")
+        return False, "Database error during expansion."
+    
+def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: int, y: int, w: int, h: int, soil_type: str, irrigation: bool) -> bool:
+    """Updates an existing parcel's details and coordinates."""
+    try:
+        db = Database.get_db()
+        db.parcels.update_one(
+            {"_id": ObjectId(parcel_id)},
+            {"$set": {
+                "name": name,
+                "area": area,
+                "latitude": lat,
+                "longitude": lng,
+                "x": int(x),
+                "y": int(y),
+                "width": int(w),
+                "height": int(h),
+                "soil_type": soil_type,      # REQ-2.2
+                "irrigation": irrigation     # REQ-2.3
+            }}
+        )
+        return True
+    except Exception as e:
+        print(f"Error updating parcel: {e}")
+        return False
