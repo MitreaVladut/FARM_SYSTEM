@@ -1,8 +1,8 @@
-"""Staff Inventory Management Page - REQ-4.1"""
+"""Staff Inventory Management Page - REQ-4.1 & REQ-4.9"""
 import reflex as rx
 from .db import get_all_inventory, update_inventory_item
 
-class InventoryState(rx.State):  # pylint: disable=inherit-non-class
+class InventoryState(rx.State):  
     items: list[dict] = []
 
     def fetch_items(self):
@@ -12,47 +12,58 @@ class InventoryState(rx.State):  # pylint: disable=inherit-non-class
         except Exception as e:
             print(f"Error: {e}")
 
-    def toggle_status(self, product_name: str):
-        """Toggle status using the name as a unique identifier."""
-        # Find the product in the current state list
-        product = next((item for item in self.items if item["name"] == product_name), None)
-        
-        if product:
-            new_status = "Out of Stock" if product["status"] == "In Stock" else "In Stock"
-            # Update the specific field in MongoDB
-            update_inventory_item(product_name, {"status": new_status})
-            # Refresh the table data
-            self.fetch_items()
+    # --- NEW: Logistics Tracking (REQ-4.9) ---
+    def update_location(self, item_name: str, new_location: str):
+        """Tracks the physical movement of goods through the warehouse."""
+        update_inventory_item(item_name, {"location": new_location})
+        self.fetch_items()
+        return rx.toast.info(f"Moved {item_name} to {new_location}.")
+
+    def update_status(self, item_name: str, new_status: str):
+        """Updates the QA/Availability status of the goods."""
+        update_inventory_item(item_name, {"status": new_status})
+        self.fetch_items()
+        return rx.toast.info(f"Status of {item_name} changed to {new_status}.")
+    # -----------------------------------------
 
 def inventory_row(product: dict):
     """Render a single row in the inventory table."""
     return rx.table.row(
-        rx.table.cell(product["name"]),
-        rx.table.cell(product["stock"]),
-        rx.table.cell(product["price"]),
+        rx.table.cell(product["name"].to(str), weight="bold"),
         rx.table.cell(
-            rx.badge(
-                product["status"],
-                # Use rx.cond for client-side reactive coloring
-                color_scheme=rx.cond(product["status"] == "In Stock", "green", "red"),
+            rx.hstack(
+                rx.text(product["stock"].to(str), weight="bold", color="#2d5a27"),
+                rx.text(product.get("unit", "kg").to(str), color="gray")
             )
         ),
+        rx.table.cell(rx.text("$", product.get("price", "0").to(str))),
+        
+        # REQ-4.9: Warehouse Location Dropdown
         rx.table.cell(
-            rx.button(
-                "Toggle Status",
-                size="1",
-                # Pass the string name directly to the state method
-                on_click=lambda: InventoryState.toggle_status(product["name"]), # pylint: disable=no-value-for-parameter
-                variant="surface",
+            rx.select(
+                ["Receiving Bay", "Cold Storage A", "Cold Storage B", "Dry Warehouse 1", "Shipping Dock"],
+                value=product.get("location", "Receiving Bay").to(str),
+                on_change=lambda val: InventoryState.update_location(product["name"].to(str), val),
+                color_scheme="blue",
+            )
+        ),
+        
+        # REQ-4.9: QA Status Dropdown (Upgraded from the old Toggle button)
+        rx.table.cell(
+            rx.select(
+                ["Pending QA", "In Stock", "Quarantined", "Out of Stock"],
+                value=product.get("status", "Pending QA").to(str),
+                on_change=lambda val: InventoryState.update_status(product["name"].to(str), val),
+                color_scheme=rx.cond(product.get("status", "") == "In Stock", "green", "orange"),
             )
         ),
     )
 
 def inventory_admin_page():
-    """The main UI for Staff to manage farm output."""
+    """The main UI for Staff to manage farm output and logistics."""
     return rx.vstack(
         rx.hstack(
-            rx.heading("Staff Inventory Dashboard", size="7", color="#2d5a27"),
+            rx.heading("📦 Warehouse & Inventory Dashboard", size="7", color="#2d5a27"),
             rx.spacer(),
             rx.button(
                 "Refresh Data", 
@@ -61,17 +72,20 @@ def inventory_admin_page():
                 variant="soft"
             ),
             width="100%",
-            padding_bottom="20px",
+            padding_bottom="10px",
             align_items="center",
         ),
+        rx.text("Track storage levels, physical warehouse locations, and QA status.", color="gray", margin_bottom="20px"),
+        
         rx.table.root(
             rx.table.header(
                 rx.table.row(
                     rx.table.column_header_cell("Product"),
                     rx.table.column_header_cell("Stock Level"),
                     rx.table.column_header_cell("Price"),
-                    rx.table.column_header_cell("Status"),
-                    rx.table.column_header_cell("Actions"),
+                    rx.table.column_header_cell("Warehouse Location"), # NEW
+                    rx.table.column_header_cell("QA Status"),          # UPGRADED
+                    style={"background_color": "#2d5a27", "color": "white"}
                 ),
             ),
             rx.table.body(
@@ -79,6 +93,7 @@ def inventory_admin_page():
             ),
             width="100%",
             variant="surface",
+            box_shadow="0 4px 6px -1px rgba(0, 0, 0, 0.1)"
         ),
         on_mount=InventoryState.fetch_items,
         padding="40px",

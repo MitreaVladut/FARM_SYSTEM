@@ -840,6 +840,7 @@ def dashboard_page():
                 rx.button("+ New Parcel", color_scheme="blue", size="2", on_click=DashboardState.open_parcel_modal),
                 rx.button("+ New Crop Type", color_scheme="blue", size="2", on_click=DashboardState.open_crop_modal),
                 rx.button("Generate Report", color_scheme="green", size="2", on_click=rx.redirect("/admin/reports")),
+                rx.button("Warehouse Logistics", color_scheme="purple", size="2", on_click=rx.redirect("/admin/inventory")),
                 rx.button("+ Add Employee", color_scheme="blue", size="2", on_click=DashboardState.open_add_modal),
                 rx.button("- Remove Employee", color_scheme="red", size="2", on_click=DashboardState.open_remove_modal),
                 rx.button("System Backup", color_scheme="red", size="2", on_click=rx.redirect("/admin/backup")),
