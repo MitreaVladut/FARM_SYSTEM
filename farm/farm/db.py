@@ -708,3 +708,47 @@ def delete_task(task_id: str) -> bool:
         return True
     except Exception:
         return False
+    
+
+    # --- REPORTING & ANALYTICS FUNCTIONS ---
+def get_production_vs_orders_report() -> list:
+    """Aggregates total produced quantities vs total ordered quantities per crop."""
+    try:
+        db = Database.get_db()
+
+        # 1. Total Production per Crop
+        production_records = list(db.production_records.find())
+        production_totals = {}
+        for rec in production_records:
+            crop = str(rec.get("crop", "Unknown")).strip()
+            yield_val = float(rec.get("actual_yield", 0.0))
+            production_totals[crop] = production_totals.get(crop, 0.0) + yield_val
+
+        # 2. Total Orders per Crop
+        orders = list(db.orders.find({"status": {"$ne": "Cancelled"}}))
+        order_totals = {}
+        for order in orders:
+            for item in order.get("items", []):
+                crop = str(item.get("name", "Unknown")).strip()
+                qty = float(item.get("quantity", 0.0))
+                order_totals[crop] = order_totals.get(crop, 0.0) + qty
+
+        # 3. Combine Data
+        all_crops = set(list(production_totals.keys()) + list(order_totals.keys()))
+        report_data = []
+        for crop in all_crops:
+            if crop.lower() in ["none", "unknown"]: 
+                continue
+            prod = production_totals.get(crop, 0.0)
+            ordered = order_totals.get(crop, 0.0)
+            report_data.append({
+                "crop": crop,
+                "produced": round(prod, 2),
+                "ordered": round(ordered, 2),
+                "surplus": round(prod - ordered, 2)
+            })
+
+        return sorted(report_data, key=lambda x: x["crop"])
+    except Exception as e:
+        print(f"Error generating report: {e}")
+        return []

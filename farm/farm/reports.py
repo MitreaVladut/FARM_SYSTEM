@@ -2,6 +2,8 @@
 import reflex as rx
 from .auth_utils import require_admin_only
 from .db import get_all_orders, get_all_parcels, get_all_production_records
+import plotly.graph_objects as go
+from .db import get_all_orders, get_all_parcels, get_all_production_records, get_production_vs_orders_report
 
 # --- COLOR DEFINITIONS ---
 CROP_COLORS = {
@@ -25,6 +27,9 @@ class ReportState(rx.State):  # pylint: disable=inherit-non-class
     crop_distribution: list[dict] = []
     production_history: list[dict] = [] # Added for REQ-9.2
     search_query: str = ""
+
+    comparison_data: list[dict] = []
+
     def load_financial_report(self):
         """Loads financials, crop distribution, and production history."""
         try:
@@ -66,9 +71,34 @@ class ReportState(rx.State):  # pylint: disable=inherit-non-class
 
             # 3. Load Production History (REQ-9.2)
             self.production_history = get_all_production_records()
+            self.comparison_data = get_production_vs_orders_report()
             
         except Exception as e:
             print(f"Error loading reports: {e}")
+
+    # NOU: Generatorul graficului Plotly
+    @rx.var
+    def comparison_chart(self) -> go.Figure:
+        fig = go.Figure()
+        if not self.comparison_data:
+            return fig
+
+        crops = [d["crop"] for d in self.comparison_data]
+        produced = [d["produced"] for d in self.comparison_data]
+        ordered = [d["ordered"] for d in self.comparison_data]
+
+        fig.add_trace(go.Bar(x=crops, y=produced, name="Total Harvested (kg)", marker_color="#2d5a27"))
+        fig.add_trace(go.Bar(x=crops, y=ordered, name="Total Ordered (kg)", marker_color="#ea580c"))
+
+        fig.update_layout(
+            barmode='group',
+            plot_bgcolor="white", paper_bgcolor="#f8fafc",
+            margin=dict(l=20, r=20, t=40, b=20),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            yaxis_title="Quantity (kg)"
+        )
+        return fig
+        
     @rx.var
     def filtered_production_history(self) -> list[dict]:
         """REQ-8.3 & REQ-8.6: Case insensitive search by crop type."""
@@ -112,6 +142,23 @@ def history_row(record: dict):
         rx.table.cell(record["quality_notes"].to(str)),
         # REQ-4.8: Fingerprint (Already correctly implemented)
         rx.table.cell(record["modified_by"].to(str)),
+    )
+
+def comparison_row(data: dict):
+    """Renders a single row in the production vs orders data table."""
+    # FIX: Explicitly cast to float so Reflex knows how to compile the math!
+    is_deficit = data["surplus"].to(float) < 0.0
+    
+    return rx.table.row(
+        rx.table.cell(data["crop"].to(str), weight="bold"),
+        rx.table.cell(data["produced"].to(str) + " kg", color="#2d5a27", weight="bold"),
+        rx.table.cell(data["ordered"].to(str) + " kg", color="#ea580c", weight="bold"),
+        rx.table.cell(
+            rx.badge(
+                rx.cond(is_deficit, "Deficit: ", "Surplus: ") + data["surplus"].to(str) + " kg",
+                color_scheme=rx.cond(is_deficit, "red", "green")
+            )
+        )
     )
 
 @require_admin_only
@@ -166,6 +213,34 @@ def reports_page():
                 background_color="white",
             ),
             
+            # --- NEW: Production vs Demand Comparison Chart ---
+            rx.heading("Production vs. Demand", size="5", margin_top="30px", color="#2d5a27"),
+            rx.card(
+                rx.cond(
+                    ReportState.comparison_data.length() > 0,
+                    rx.plotly(data=ReportState.comparison_chart, height="400px", width="100%"),
+                    rx.center(rx.text("No data available to chart.", color="gray"), height="200px")
+                ),
+                width="100%", padding="20px", background_color="white",
+            ),
+
+            # --- NEW: Raw Data Breakdown Table ---
+            rx.table.root(
+                rx.table.header(
+                    rx.table.row(
+                        rx.table.column_header_cell("Crop Type"),
+                        rx.table.column_header_cell("Total Harvested"),
+                        rx.table.column_header_cell("Total Ordered"),
+                        rx.table.column_header_cell("Inventory Balance"),
+                        style={"background_color": "#2d5a27", "color": "white"}
+                    ),
+                ),
+                rx.table.body(rx.foreach(ReportState.comparison_data, comparison_row)),
+                width="100%", variant="surface", box_shadow="0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                margin_bottom="30px"
+            ),
+            # --------------------------------------------------
+            
             # Data Table (REQ-9.5)
             rx.heading("Customer Purchase History", size="5", margin_top="30px", color="#2d5a27"),
             rx.table.root(
@@ -218,7 +293,7 @@ def reports_page():
                 ),
                 rx.cond(
                     ReportState.search_query != "",
-                    rx.text("Ups we don't grow that", color="red", weight="bold"), # REQ-8.8
+                    rx.text("Ups we don't grow that", color="red", weight="bold"), 
                     rx.text("No production history found.", color="gray")
                 )
             ),

@@ -382,9 +382,9 @@ def staff_page():
 
             # Stats Row
             rx.hstack(
-                stat_card("Total Employees", "14", color="#2d5a27"),
-                stat_card("Active Today", "11", color="#2d5a27"),
-                stat_card("On Leave / Day Off", "2", color="#2d5a27"),
+                stat_card("Total Employees", "5", color="#2d5a27"),
+                stat_card("Active Today", "3", color="#2d5a27"),
+                stat_card("On Leave / Day Off", "1", color="#2d5a27"),
                 stat_card("Hours Worked This Month", "~1,820", color="#2d5a27"),
                 spacing="5", padding_y="20px", justify="center", width="100%",
             ),
