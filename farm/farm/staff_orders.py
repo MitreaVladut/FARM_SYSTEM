@@ -43,16 +43,18 @@ class StaffOrderState(rx.State):
 
     @rx.var
     def filtered_orders(self) -> list[dict]:
-        """REQ-8.5 & REQ-8.6: Case insensitive search by status."""
+        """REQ-8.5 & REQ-8.6: Case insensitive search by status and date."""
         if not self.search_query:
             return self.orders
         
         query = self.search_query.lower().strip()
-        query = "".join(e for e in query if e.isalnum() or e.isspace())
+        # Permitem caracterele folosite în date (cratimă, punct, două puncte, slash)
+        query = "".join(e for e in query if e.isalnum() or e.isspace() or e in "-/.:")
         
         return [
             o for o in self.orders 
             if query in str(o.get("status", "")).lower()
+            or query in str(o.get("timestamp", "")).lower() # NOU: Căutare după dată
         ]
 
 def staff_navbar():
@@ -165,10 +167,10 @@ def staff_orders_page():
                     rx.heading("Staff Dashboard - Orders", size="7"),
                     rx.spacer(),
                     # Add the search bar here
-                    rx.input(
-                        placeholder="🔍 Search orders by status...", 
+                   rx.input(
+                        placeholder="🔍 Search orders by status or date (e.g., 2026-05-05)...", 
                         on_change=StaffOrderState.set_search_query,
-                        width="300px"
+                        width="380px" # Lățit pentru noul text
                     ),
                     rx.button("Logout", on_click=StoreState.logout, color_scheme="red"),
                     width="100%",
