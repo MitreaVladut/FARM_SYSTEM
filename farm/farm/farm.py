@@ -1,4 +1,6 @@
 """Main entry point for Farm Management System"""
+
+#new page
 import reflex as rx
 from farm.login import login_page
 from farm.dashboard import dashboard_page
