@@ -176,48 +176,68 @@ def update_order_status(order_id: str, new_status: str):
     db = Database.get_db()
     db.orders.update_one({"_id": ObjectId(order_id)}, {"$set": {"status": new_status}})
 
+def get_season(month: int) -> str:
+    """Helper to map a calendar month to a meteorological season."""
+    if month in [3, 4, 5]: return "spring"
+    if month in [6, 7, 8]: return "summer"
+    if month in [9, 10, 11]: return "autumn"
+    return "winter"
+
 # Add this under your other functions in farm/db.py
 def get_all_parcels():
-    """REQ-2.4 & Spatial Geometry: Fetch parcels, auto-update status, and repair coordinates."""
+    """REQ-2.4 & REQ-2.10: Fetch parcels, auto-update status with strict season validation, and repair coordinates."""
     import datetime
     db = Database.get_db()
     parcels = list(db.parcels.find())
     
-    today = datetime.date.today().isoformat() 
+    today_obj = datetime.date.today()
+    today = today_obj.isoformat() 
+    current_season = get_season(today_obj.month)
+
+    print(f"🕒 [SYSTEM TIME] Today is: {today} | Season: {current_season.upper()}")
+
+    # Build a quick lookup dictionary of { "Crop Name" : "Season String" }
+    crop_seasons = {c["name"]: str(c.get("planting_season", "")).lower() for c in db.crops.find()}
 
     for parcel in parcels:
         parcel_id = parcel["_id"]
         current_status = str(parcel.get("status", ""))
         p_date = str(parcel.get("planting_date", "None"))
+        crop_name = str(parcel.get("crop", "Unknown"))
 
-        # Time-based transitions logic
-        if current_status not in ["Available", "Harvested"] and p_date != "None":
-            new_status = "In Production" if today >= p_date else "Planned"
-            if current_status != new_status:
+        # --- REQ-2.10: Complex Season Validation ---
+        if current_status == "Planned" and p_date != "None" and today >= p_date:
+            c_season = crop_seasons.get(crop_name, "")
+            
+            is_match = True
+            if c_season: # Only validate if the crop actually has a defined season
+                match_words = [current_season]
+                if current_season == "autumn": match_words.append("fall") # Catch synonyms
+                
+                # Check if the current season is mentioned anywhere in the crop's string
+                is_match = any(word in c_season for word in match_words)
+            
+            if is_match:
+                new_status = "In Production"
                 db.parcels.update_one({"_id": parcel_id}, {"$set": {"status": new_status}})
                 parcel["status"] = new_status
+            else:
+                # BLOCK ACTIVATED! The DB stays "Planned", but we warn the UI.
+                print(f"⚠️ [REQ-2.10] Blocked '{parcel.get('name')}'. {current_season.upper()} does not match '{c_season}'.")
+                parcel["status"] = "Season Locked"
 
-        # --- NEW: Spatial Geometry Repair ---
-        # Account for older parcels that lack explicit coordinates by assigning defaults.
+        # --- Spatial Geometry Repair ---
         needs_repair = False
         updates = {}
-        
         for coord in ["x", "y"]:
             if coord not in parcel:
-                parcel[coord] = 0
-                updates[coord] = 0
-                needs_repair = True
-                
+                parcel[coord], updates[coord], needs_repair = 0, 0, True
         for dim in ["width", "height"]:
             if dim not in parcel:
-                parcel[dim] = 10 # Default fallback dimension
-                updates[dim] = 10
-                needs_repair = True
+                parcel[dim], updates[dim], needs_repair = 10, 10, True
                 
         if needs_repair:
-            # Update the database permanently to fix the broken document[cite: 3]
             db.parcels.update_one({"_id": parcel_id}, {"$set": updates})
-        # ------------------------------------
 
         parcel["id"] = str(parcel.pop("_id"))
         parcel["active"] = "true" if parcel.get("active", True) else "false"
@@ -290,13 +310,13 @@ def get_all_crops() -> list:
     return combined_crops
 
 # Note the added latitude and longitude in the arguments here!
-def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str, lng: str, x: int, y: int, w: int, h: int, soil_type: str, irrigation: bool) -> tuple[bool, str]:
+def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str, lng: str, x: float, y: float, w: float, h: float, soil_type: str, irrigation: bool) -> tuple[bool, str]:
     """Saves a new land parcel with REQ-2.9 collision detection."""
     try:
         db = Database.get_db()
         
         # 1. Define the proposed geometric shape
-        proposed_shape = {"x": int(x), "y": int(y), "width": int(w), "height": int(h)}
+        proposed_shape = {"x": float(x), "y": float(y), "width": float(w), "height": float(h)}
         
         # 2. Check for collisions against all existing parcels (REQ-2.9)
         existing_parcels = list(db.parcels.find())
@@ -309,7 +329,7 @@ def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str,
         db.parcels.insert_one({
             "name": name, "area": area, "crop": crop, "planting_date": planting_date,
             "status": status, "latitude": lat, "longitude": lng,
-            "x": int(x), "y": int(y), "width": int(w), "height": int(h),
+            "x": float(x), "y": float(y), "width": float(w), "height": float(h),
             "soil_type": soil_type, "irrigation": irrigation
         })
         return True, "Parcel created successfully!"
@@ -328,6 +348,11 @@ def harvest_parcel(parcel_id: str, actual_yield: float, quality_notes: str, user
         if not parcel:
             return False
             
+        # --- NEW SECURITY BLOCK ---
+        if parcel.get("status") != "In Production":
+            print(f"⚠️ Security Block: Attempted to harvest parcel while status is '{parcel.get('status')}'.")
+            return False
+
         crop_name = str(parcel.get("crop", "Unknown")).strip()
         if not crop_name or crop_name.lower() == "none" or crop_name == "Unknown":
             return False 
@@ -492,29 +517,45 @@ def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool
         print(f"Expansion error: {e}")
         return False, "Database error during expansion."
     
-def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: int, y: int, w: int, h: int, soil_type: str, irrigation: bool) -> tuple[bool, str]:
-    """Updates a parcel with REQ-2.9 collision detection."""
+def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: float, y: float, w: float, h: float, soil_type: str, irrigation: bool, crop: str, planting_date: str) -> tuple[bool, str]:
+    """Updates a parcel, securely locking crop changes if it is In Production."""
     try:
+        from bson.objectid import ObjectId
         db = Database.get_db()
         
-        # 1. Define the proposed resized/moved shape
-        proposed_shape = {"x": int(x), "y": int(y), "width": int(w), "height": int(h)}
+        # 1. Fetch the parcel to check its current status
+        existing_parcel = db.parcels.find_one({"_id": ObjectId(parcel_id)})
+        if not existing_parcel:
+            return False, "Parcel not found."
+            
+        current_status = existing_parcel.get("status", "Available")
         
-        # 2. Fetch all OTHER parcels (exclude the one we are currently editing)
+        # 2. SECURITY BLOCK: Prevent crop/date changes if it's already growing
+        if current_status == "In Production":
+            if crop != existing_parcel.get("crop") or planting_date != existing_parcel.get("planting_date"):
+                return False, "Security Block: Cannot modify crop or date while In Production!"
+            new_status = "In Production" # Leave it alone!
+        else:
+            # If it's not growing, they are free to plan a new crop
+            new_status = "Available" if crop == "None" or not crop else "Planned"
+
+        # 3. Geometry Checks
+        proposed_shape = {"x": float(x), "y": float(y), "width": float(w), "height": float(h)}
         other_parcels = list(db.parcels.find({"_id": {"$ne": ObjectId(parcel_id)}}))
         
-        # 3. Check for overlaps (REQ-2.9)
         for other in other_parcels:
             if is_overlapping(proposed_shape, other):
                 return False, f"Collision detected! Your new size overlaps with '{other.get('name', 'another parcel')}'."
 
-        # 4. If the space is clear, save the changes
+        # 4. Save the safe changes
         db.parcels.update_one(
             {"_id": ObjectId(parcel_id)},
             {"$set": {
                 "name": name, "area": area, "latitude": lat, "longitude": lng,
-                "x": int(x), "y": int(y), "width": int(w), "height": int(h),
-                "soil_type": soil_type, "irrigation": irrigation
+                "x": float(x), "y": float(y), "width": float(w), "height": float(h),
+                "soil_type": soil_type, "irrigation": irrigation,
+                "crop": crop, "planting_date": planting_date,
+                "status": new_status                          
             }}
         )
         return True, f"Parcel '{name}' updated successfully!"

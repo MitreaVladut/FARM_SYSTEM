@@ -67,7 +67,10 @@ class DashboardState(rx.State):
     edit_height: str = "10"
     edit_soil_type: str = ""
     edit_irrigation: bool = False
-    
+    edit_crop: str = "None" # NEW
+    edit_date: str = ""     # NEW
+    edit_status: str = ""
+
     # Delete Parcel Variables
     show_delete_parcel_modal: bool = False
     delete_parcel_id: str = ""
@@ -198,7 +201,10 @@ class DashboardState(rx.State):
     @rx.var
     def active_crop_options(self) -> list[str]:
         """REQ-3.7: Deactivated types no longer appear in new production planning."""
-        return [c.get("name", "") for c in self.crops if str(c.get("active", "true")).lower() == "true"]
+        # Fix: Add "None" directly inside the backend state so the UI doesn't have to do the math
+        options = ["None"] 
+        options.extend([c.get("name", "") for c in self.crops if str(c.get("active", "true")).lower() == "true"])
+        return options
 
     @rx.var
     def has_crops(self) -> bool:
@@ -298,13 +304,28 @@ class DashboardState(rx.State):
             return rx.toast.error("All parcel fields are required.")
         
         # Ensure we pass integers for the grid coordinates
+        import re
         try:
-            x_val = int(self.new_x) if self.new_x else 0
-            y_val = int(self.new_y) if self.new_y else 0
-            w_val = int(self.new_width) if self.new_width else 10
-            h_val = int(self.new_height) if self.new_height else 10
+            x_val = float(self.new_x) if str(self.new_x).strip() else 0.0
+            y_val = float(self.new_y) if str(self.new_y).strip() else 0.0
+            w_val = float(self.new_width) if str(self.new_width).strip() else 10.0
+            h_val = float(self.new_height) if str(self.new_height).strip() else 10.0
         except ValueError:
             return rx.toast.error("Grid coordinates (X, Y, Width, Height) must be numbers.")
+
+        # 1. Block Negative Placements
+        if x_val < 0 or y_val < 0:
+            return rx.toast.error("X and Y coordinates cannot be negative!")
+        if w_val <= 0 or h_val <= 0:
+            return rx.toast.error("Width and Height must be greater than zero!")
+        
+        # 2. Enforce Proportional Area (W * H = Area)
+        area_match = re.search(r"(\d+(\.\d+)?)", str(self.parcel_area))
+        area_val = float(area_match.group(1)) if area_match else 0.0
+
+        calculated_area = round(w_val * h_val, 2)
+        if abs(calculated_area - area_val) > 0.05: # Allows a tiny margin for decimal math
+            return rx.toast.error(f"Geometry Mismatch: Width ({w_val}) x Height ({h_val}) = {calculated_area} ha. This does not match your entered Area of {area_val} ha!")
 
         # --- UPDATED: Unpack the success boolean AND the message ---
         success, message = create_parcel(
@@ -330,7 +351,7 @@ class DashboardState(rx.State):
         # REQ-2.9: Show the collision warning or DB error
         return rx.toast.error(message)
     
-    def open_edit_modal(self, p_id: str, p_name: str, p_area: str, p_lat: str, p_lng: str, p_x: str, p_y: str, p_w: str, p_h: str):
+    def open_edit_modal(self, p_id: str, p_name: str, p_area: str, p_lat: str, p_lng: str, p_x: str, p_y: str, p_w: str, p_h: str, p_soil: str, p_irrigation: bool, p_crop: str, p_date: str, p_status: str):
         """Loads parcel data into the edit variables and opens the modal."""
         self.edit_parcel_id = str(p_id)
         self.edit_name = str(p_name)
@@ -341,6 +362,14 @@ class DashboardState(rx.State):
         self.edit_y = str(p_y) if p_y and p_y != "None" else "0"
         self.edit_width = str(p_w) if p_w and p_w != "None" else "10"
         self.edit_height = str(p_h) if p_h and p_h != "None" else "10"
+        self.edit_soil_type = str(p_soil) if p_soil and p_soil != "None" else ""
+        self.edit_irrigation = p_irrigation
+        
+        # NEW: Load crop and date
+        self.edit_crop = str(p_crop) if p_crop and p_crop != "None" else "None"
+        self.edit_date = str(p_date) if p_date and p_date != "None" else ""
+        self.edit_status = str(p_status) # NEW: Store the status
+
         self.show_edit_modal = True
 
     def save_parcel_edits(self):
@@ -349,30 +378,42 @@ class DashboardState(rx.State):
             return rx.toast.error("Name and Area are required.")
             
         # Robust conversion: Default to 0/10 if empty, handle strings safely
+        import re
         try:
-            x_val = int(self.edit_x) if str(self.edit_x).strip() else 0
-            y_val = int(self.edit_y) if str(self.edit_y).strip() else 0
-            w_val = int(self.edit_width) if str(self.edit_width).strip() else 10
-            h_val = int(self.edit_height) if str(self.edit_height).strip() else 10
+            x_val = float(self.edit_x) if str(self.edit_x).strip() else 0.0
+            y_val = float(self.edit_y) if str(self.edit_y).strip() else 0.0
+            w_val = float(self.edit_width) if str(self.edit_width).strip() else 10.0
+            h_val = float(self.edit_height) if str(self.edit_height).strip() else 10.0
         except ValueError:
-            return rx.toast.error("Grid coordinates (X, Y, Width, Height) must be numbers.")
+            return rx.toast.error("Grid coordinates must be numbers.")
+        
+        # 1. Block Negative Placements
+        if x_val < 0 or y_val < 0:
+            return rx.toast.error("X and Y coordinates cannot be negative!")
+        if w_val <= 0 or h_val <= 0:
+            return rx.toast.error("Width and Height must be greater than zero!")
+
+        # 2. Enforce Proportional Area (W * H = Area)
+        area_match = re.search(r"(\d+(\.\d+)?)", str(self.edit_area))
+        area_val = float(area_match.group(1)) if area_match else 0.0
+
+        calculated_area = round(w_val * h_val, 2)
+        if abs(calculated_area - area_val) > 0.05: 
+            return rx.toast.error(f"Geometry Mismatch: Width ({w_val}) x Height ({h_val}) = {calculated_area} ha. This does not match your entered Area of {area_val} ha!")
 
         # Ensure we are importing the correct function
+        if self.edit_crop and self.edit_crop != "None":
+            if not self.edit_date:
+                return rx.toast.error("A Planting Date is required when assigning a new crop.")
+
         from .db import update_parcel
         
         # --- UPDATED: Unpack the tuple to catch the collision warning ---
         success, message = update_parcel(
-            str(self.edit_parcel_id),
-            str(self.edit_name),
-            str(self.edit_area),
-            str(self.edit_lat),
-            str(self.edit_lng),
-            x_val,
-            y_val,
-            w_val,
-            h_val,
-            str(self.edit_soil_type), 
-            self.edit_irrigation      
+            str(self.edit_parcel_id), str(self.edit_name), str(self.edit_area),
+            str(self.edit_lat), str(self.edit_lng), x_val, y_val, w_val, h_val,
+            str(self.edit_soil_type), self.edit_irrigation,
+            str(self.edit_crop), str(self.edit_date) # NEW: Send to DB
         )
         
         if success:
@@ -611,20 +652,22 @@ def parcel_row(parcel: dict):
         rx.table.cell(parcel["crop"].to(str)),
         rx.table.cell(parcel["planting_date"].to(str)),
         rx.table.cell(
-            # 2. Show "Inactive" (grey) if deactivated, otherwise show normal status (blue)
+            # 2. Show "Inactive" (grey) if deactivated, otherwise handle dynamic colors
             rx.badge(
                 rx.cond(is_active, parcel["status"].to(str), "Inactive"), 
                 color_scheme=rx.cond(
                     ~is_active, "gray", 
-                    rx.cond(parcel["status"] == "In Production", "green", "blue")
+                    rx.cond(
+                        parcel["status"] == "In Production", "green", 
+                        rx.cond(parcel["status"] == "Season Locked", "orange", "blue")
+                    )
                 )
             )
         ),
         rx.table.cell(
             rx.hstack( 
                 rx.cond(
-                    parcel["status"] != "Available",
-                    # Disable harvest if inactive
+                    parcel["status"] == "In Production",
                     rx.button("Harvest", size="1", color_scheme="orange", disabled=~is_active, on_click=lambda: DashboardState.open_harvest_modal(parcel["id"].to(str))),
                 ),
                 # Add the Edit button
@@ -645,7 +688,9 @@ def parcel_row(parcel: dict):
                         parcel.get("width", "10"),
                         parcel.get("height", "10"),
                         parcel.get("soil_type", ""),    # Phase 1 variable
-                        parcel.get("irrigation", False) # Phase 1 variable
+                        parcel.get("irrigation", False), # Phase 1 variable
+                        parcel.get("crop", "None"), parcel.get("planting_date", ""),
+                        parcel["status"].to(str) # NEW: Pass the status to the backend!
                     )
                 ),
                 # 3. Add the brand new Activation Toggle Button
@@ -655,12 +700,8 @@ def parcel_row(parcel: dict):
                     color_scheme=rx.cond(is_active, "red", "green"), 
                     variant="surface",
                     on_click=lambda: DashboardState.toggle_parcel(parcel["id"].to(str), parcel["active"].to(str))
-                
                 ),
-                spacing="2",
-                
-            ),
-            # 4. Add the permanent Delete Button
+                # 4. Add the permanent Delete Button (Now inside the hstack)
                 rx.button(
                     rx.icon("trash-2", size=16), 
                     size="1", 
@@ -670,6 +711,8 @@ def parcel_row(parcel: dict):
                         parcel["id"].to(str), parcel["name"].to(str), parcel["status"].to(str)
                     )
                 ),
+                spacing="2",
+            ),
         ),
         # 4. Dim the entire row visually if deactivated
         opacity=rx.cond(is_active, "1.0", "0.5") 
@@ -876,7 +919,34 @@ def edit_parcel_dialog():
                 
                 rx.text("Area (ha)", size="1", color="gray", width="100%", text_align="left"),
                 rx.input(value=DashboardState.edit_area, on_change=DashboardState.set_edit_area, width="100%"),
+
+                # --- NEW REPLANTING FIELDS ---
+
+                # Add a visual lock warning
+                rx.cond(
+                    DashboardState.edit_status == "In Production",
+                    rx.callout("Crop details are locked while actively In Production.", icon="lock", color_scheme="orange", width="100%", margin_bottom="10px")
+                ),
+
+                rx.text("Replant Crop Type:", size="1", color="gray", width="100%", text_align="left", margin_top="10px"),
+                rx.select(
+                    DashboardState.active_crop_options, # FIX: Removed ["None"] +
+                    value=DashboardState.edit_crop,
+                    on_change=DashboardState.set_edit_crop,
+                    width="100%", color_scheme="grass",
+                    disabled=DashboardState.edit_status == "In Production" # NEW: Disable if growing
+                ),
                 
+                rx.text("Planting Date:", size="1", color="gray", width="100%", text_align="left"),
+                rx.input(
+                    type="date",
+                    value=DashboardState.edit_date,
+                    on_change=DashboardState.set_edit_date, 
+                    width="100%",
+                    disabled=DashboardState.edit_status == "In Production" # NEW: Disable if growing
+                ),
+                # -----------------------------
+
                 rx.divider(margin_y="10px"),
                 rx.text("Location & Size Coordinates:", size="2", color="gray", width="100%", text_align="left"),
                 rx.text("Environment & Soil:", size="2", color="gray", width="100%", text_align="left"),
