@@ -313,6 +313,26 @@ def farm_info_banner():
         width="100%", margin_top="20px", padding="20px", background_color="#f0fdf4", border="1px solid #bbf7d0"
     )
 
+def donation_banner():
+    """Displays information about the farm's donation pledge at the bottom of the page."""
+    return rx.card(
+        rx.hstack(
+            rx.icon("heart-handshake", size=40, color="#2d5a27"),
+            rx.vstack(
+                rx.heading("Our Pledge to Nature", size="5", color="#2d5a27"),
+                rx.text(
+                    "1% of our monthly revenue will be donated along with the excess produces "
+                    'to "The natural reservation of Buffalos" from the Retezat Mountains.',
+                    color="gray", size="2"
+                ),
+                align_items="start"
+            ),
+            spacing="4", align_items="center"
+        ),
+        width="100%", margin_top="40px", margin_bottom="40px", padding="20px", 
+        background_color="#f0fdf4", border="1px solid #bbf7d0"
+    )
+
 def order_history_row(order: dict):
     """Displays a single order in the history modal."""
     # REQ-7.7: We only allow cancellation if the order is still "Created"
@@ -384,6 +404,9 @@ def storefront_page():
                 ),
             ),
             
+            # --- NEW: Donation Banner placed at the bottom ---
+            rx.box(donation_banner(), width="80%", max_width="900px"),
+
             # Shopping Cart Floating Button
             rx.box(
                 rx.hstack(
