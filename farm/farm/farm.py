@@ -13,6 +13,7 @@ from .staff_orders import staff_orders_page
 from farm.reports import reports_page
 from farm.data_management import data_management_page
 from farm.backup import backup_page
+from farm.my_orders import my_orders_page
 
 # pylint: disable=not-callable
 app = rx.App(
@@ -39,3 +40,4 @@ app.add_page(staff_orders_page, route="/orders")
 app.add_page(reports_page, route="/admin/reports")
 app.add_page(data_management_page, route="/admin/data")
 app.add_page(backup_page, route="/admin/backup")
+app.add_page(my_orders_page, route="/my-orders")

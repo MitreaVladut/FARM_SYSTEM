@@ -111,13 +111,15 @@ class Database:
             cls._client.close()
 
     @classmethod
-    def create_order(cls, cart_items: list, total_price: float) -> bool:
+    def create_order(cls, cart_items: list, total_price: float, customer_email: str) -> bool:
         """REQ-6.2: Inserts a new order into the database."""
+        import datetime
         try:
             db = cls.get_db()
             order_doc = {
+                "customer_email": customer_email, # NEW: Links the order to the user!
                 "items": cart_items,
-                "total": round(total_price, 2), # REQ-6.6: Stores exact cumulative price
+                "total": round(total_price, 2), 
                 "status": "Created",
                 "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
             }
@@ -309,20 +311,21 @@ def get_all_crops() -> list:
 
     return combined_crops
 
-# Note the added latitude and longitude in the arguments here!
-def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str, lng: str, x: float, y: float, w: float, h: float, soil_type: str, irrigation: bool) -> tuple[bool, str]:
-    """Saves a new land parcel with REQ-2.9 collision detection."""
+def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str, lng: str, x: float, y: float, w: float, h: float, soil_type: str, irrigation: bool, coordinates: list = None) -> tuple[bool, str]:
+    """Saves a new land parcel with advanced Polygon collision detection."""
     try:
         db = Database.get_db()
         
-        # 1. Define the proposed geometric shape
-        proposed_shape = {"x": float(x), "y": float(y), "width": float(w), "height": float(h)}
+        # 1. Define the proposed shape (Handles both rectangles and custom polygons)
+        proposed_parcel = {"x": float(x), "y": float(y), "width": float(w), "height": float(h), "coordinates": coordinates}
+        proposed_poly = get_polygon(proposed_parcel)
         
-        # 2. Check for collisions against all existing parcels (REQ-2.9)
+        # 2. Check for collisions against all existing parcels
         existing_parcels = list(db.parcels.find())
         for other in existing_parcels:
-            if is_overlapping(proposed_shape, other):
-                return False, f"Collision detected! This space is already occupied by '{other.get('name', 'another parcel')}'."
+            other_poly = get_polygon(other)
+            if polygons_overlap(proposed_poly, other_poly):
+                return False, f"Collision detected! Space occupied by '{other.get('name', 'another parcel')}'."
 
         # 3. If no overlap, proceed with creation
         status = "Available" if crop == "None" or not crop else "Planned"
@@ -330,6 +333,7 @@ def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str,
             "name": name, "area": area, "crop": crop, "planting_date": planting_date,
             "status": status, "latitude": lat, "longitude": lng,
             "x": float(x), "y": float(y), "width": float(w), "height": float(h),
+            "coordinates": coordinates, # NEW: Save custom shape geometry
             "soil_type": soil_type, "irrigation": irrigation
         })
         return True, "Parcel created successfully!"
@@ -486,15 +490,73 @@ def restore_database(json_string: str) -> bool:
         print(f"Restore error: {e}")
         return False
     
-def is_overlapping(rect1: dict, rect2: dict) -> bool:
-    """Mathematical check if two rectangles overlap on a grid."""
-    # We assume each dict has x, y, width, and height
-    return (
-        rect1.get('x', 0) < rect2.get('x', 0) + rect2.get('width', 0) and
-        rect1.get('x', 0) + rect1.get('width', 0) > rect2.get('x', 0) and
-        rect1.get('y', 0) < rect2.get('y', 0) + rect2.get('height', 0) and
-        rect1.get('y', 0) + rect1.get('height', 0) > rect2.get('y', 0)
-    )
+# --- ADVANCED GEOMETRY ENGINE (Supports Rectangles & Custom Polygons) ---
+
+def get_polygon(parcel_data: dict) -> list:
+    """Converts any parcel into a standard list of point coordinates."""
+    if "coordinates" in parcel_data and parcel_data["coordinates"]:
+        return parcel_data["coordinates"]
+    
+    # Safely convert old legacy parcels to avoid ValueError crashes
+    try:
+        x = float(parcel_data.get("x") or 0)
+        y = float(parcel_data.get("y") or 0)
+        w = float(parcel_data.get("width") or 10)
+        h = float(parcel_data.get("height") or 10)
+    except (ValueError, TypeError):
+        x, y, w, h = 0.0, 0.0, 10.0, 10.0
+        
+    return [
+        {"x": x, "y": y}, 
+        {"x": x + w, "y": y}, 
+        {"x": x + w, "y": y + h}, 
+        {"x": x, "y": y + h}
+    ]
+
+def is_point_in_polygon(point: dict, polygon: list) -> bool:
+    """Ray-casting algorithm to mathematically check if a point is inside a polygon."""
+    if not polygon or len(polygon) < 3: return False
+    
+    x, y = point['x'], point['y']
+    inside = False
+    n = len(polygon)
+    p1x, p1y = polygon[0]['x'], polygon[0]['y']
+    
+    for i in range(1, n + 1):
+        p2x, p2y = polygon[i % n]['x'], polygon[i % n]['y']
+        if y > min(p1y, p2y):
+            if y <= max(p1y, p2y):
+                if x <= max(p1x, p2x):
+                    if p1y != p2y: # Avoid division by zero on horizontal lines
+                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                        # FIX: This check must be indented inside the p1y != p2y block!
+                        if p1x == p2x or x <= xinters:
+                            inside = not inside
+        p1x, p1y = p2x, p2y
+    return inside
+
+def _ccw(A, B, C):
+    """Helper for edge intersection."""
+    return (C['y'] - A['y']) * (B['x'] - A['x']) > (B['y'] - A['y']) * (C['x'] - A['x'])
+
+def _segments_intersect(A, B, C, D):
+    """Checks if two lines cross each other."""
+    return _ccw(A, C, D) != _ccw(B, C, D) and _ccw(A, B, C) != _ccw(A, B, D)
+
+def polygons_overlap(poly1: list, poly2: list) -> bool:
+    """Checks if two shapes overlap using point-in-polygon and edge intersection."""
+    # 1. Check if any point of shape 1 is inside shape 2
+    for p in poly1:
+        if is_point_in_polygon(p, poly2): return True
+    # 2. Check if any point of shape 2 is inside shape 1
+    for p in poly2:
+        if is_point_in_polygon(p, poly1): return True
+    # 3. Check if any boundaries cross
+    for i in range(len(poly1)):
+        for j in range(len(poly2)):
+            if _segments_intersect(poly1[i], poly1[(i+1)%len(poly1)], poly2[j], poly2[(j+1)%len(poly2)]):
+                return True
+    return False
 
 def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool, str]:
     """Attempts to expand a parcel, returns (Success, Message)."""
@@ -533,42 +595,41 @@ def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool
         print(f"Expansion error: {e}")
         return False, "Database error during expansion."
     
-def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: float, y: float, w: float, h: float, soil_type: str, irrigation: bool, crop: str, planting_date: str) -> tuple[bool, str]:
-    """Updates a parcel, securely locking crop changes if it is In Production."""
+def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: float, y: float, w: float, h: float, soil_type: str, irrigation: bool, crop: str, planting_date: str, coordinates: list = None) -> tuple[bool, str]:
+    """Updates a parcel with advanced Polygon collision detection."""
     try:
         from bson.objectid import ObjectId
         db = Database.get_db()
         
-        # 1. Fetch the parcel to check its current status
         existing_parcel = db.parcels.find_one({"_id": ObjectId(parcel_id)})
         if not existing_parcel:
             return False, "Parcel not found."
             
         current_status = existing_parcel.get("status", "Available")
         
-        # 2. SECURITY BLOCK: Prevent crop/date changes if it's already growing
         if current_status == "In Production":
             if crop != existing_parcel.get("crop") or planting_date != existing_parcel.get("planting_date"):
                 return False, "Security Block: Cannot modify crop or date while In Production!"
-            new_status = "In Production" # Leave it alone!
+            new_status = "In Production"
         else:
-            # If it's not growing, they are free to plan a new crop
             new_status = "Available" if crop == "None" or not crop else "Planned"
 
-        # 3. Geometry Checks
-        proposed_shape = {"x": float(x), "y": float(y), "width": float(w), "height": float(h)}
+        # Geometry Checks
+        proposed_parcel = {"x": float(x), "y": float(y), "width": float(w), "height": float(h), "coordinates": coordinates}
+        proposed_poly = get_polygon(proposed_parcel)
         other_parcels = list(db.parcels.find({"_id": {"$ne": ObjectId(parcel_id)}}))
         
         for other in other_parcels:
-            if is_overlapping(proposed_shape, other):
-                return False, f"Collision detected! Your new size overlaps with '{other.get('name', 'another parcel')}'."
+            other_poly = get_polygon(other)
+            if polygons_overlap(proposed_poly, other_poly):
+                return False, f"Collision detected! Overlaps with '{other.get('name', 'another parcel')}'."
 
-        # 4. Save the safe changes
         db.parcels.update_one(
             {"_id": ObjectId(parcel_id)},
             {"$set": {
                 "name": name, "area": area, "latitude": lat, "longitude": lng,
                 "x": float(x), "y": float(y), "width": float(w), "height": float(h),
+                "coordinates": coordinates, # NEW: Save custom shape geometry
                 "soil_type": soil_type, "irrigation": irrigation,
                 "crop": crop, "planting_date": planting_date,
                 "status": new_status                          
@@ -710,6 +771,7 @@ def delete_task(task_id: str) -> bool:
         return False
     
 
+
     # --- REPORTING & ANALYTICS FUNCTIONS ---
 def get_production_vs_orders_report() -> list:
     """Aggregates total produced quantities vs total ordered quantities per crop."""
@@ -752,3 +814,13 @@ def get_production_vs_orders_report() -> list:
     except Exception as e:
         print(f"Error generating report: {e}")
         return []
+    
+
+def get_orders_by_user(email: str):
+    """Fetches order history for a specific customer."""
+    db = Database.get_db()
+    # Find orders where the customer_email matches
+    orders = list(db.orders.find({"customer_email": email}))
+    for order in orders:
+        order["id"] = str(order.pop("_id"))
+    return orders

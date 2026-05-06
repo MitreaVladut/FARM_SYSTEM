@@ -77,6 +77,11 @@ class DashboardState(rx.State):
     delete_parcel_name: str = ""
     delete_parcel_status: str = ""
 
+    # --- INTERACTIVE DRAWING GRID VARIABLES ---
+    draw_mode: str = "Rectangle"
+    temp_coordinates: list[dict] = []
+    grid_cells: list[dict] = [] # We will build this dynamically now
+
     def open_delete_parcel_modal(self, p_id: str, p_name: str, p_status: str):
         """Triggers the confirmation warning."""
         self.delete_parcel_id = str(p_id)
@@ -117,6 +122,7 @@ class DashboardState(rx.State):
         max_boundary_x = 10.0
         max_boundary_y = 10.0 
 
+        
         color_map = {
             "tomato": "#ef4444",   
             "carrot": "#f97316",   
@@ -131,24 +137,47 @@ class DashboardState(rx.State):
             date = p.get("planting_date", "Unknown")
             area_str = str(p.get("area", "0"))
 
-            # --- ADVANCED SPATIAL GEOMETRY ---
-            # Instead of a calculated square, we use exact DB coordinates[cite: 3]
-            try:
-                x_val = float(p.get("x", 0))
-                y_val = float(p.get("y", 0))
-                w_val = float(p.get("width", 10))
-                h_val = float(p.get("height", 10))
-            except ValueError:
-                x_val, y_val, w_val, h_val = 0.0, 0.0, 10.0, 10.0
+            # --- ADVANCED SPATIAL GEOMETRY FOR POLYGONS ---
+            coords = p.get("coordinates", [])
+            x_coords = []
+            y_coords = []
 
-            # Map the exact rectangular corners[cite: 3]
-            x_coords = [x_val, x_val + w_val, x_val + w_val, x_val, x_val]
-            y_coords = [y_val, y_val, y_val + h_val, y_val + h_val, y_val]
+            if coords:
+                # 1. Use the new precise geometric shapes (Custom or Drawn Rectangles)
+                x_coords = [float(c["x"]) for c in coords]
+                y_coords = [float(c["y"]) for c in coords]
+                # Append the first point to the end to close the shape!
+                if len(x_coords) > 0:
+                    x_coords.append(float(coords[0]["x"]))
+                    y_coords.append(float(coords[0]["y"]))
+                
+                # Dynamic hover text for polygons
+                hover_text = f"<b>{name}</b><br>Crop: {crop}<br>Planted: {date}<br>Area: {area_str} ha<br>Shape: Custom Polygon"
+                
+            else:
+                # 2. Fallback for old rectangular legacy parcels
+                try:
+                    x_val = float(p.get("x", 0))
+                    y_val = float(p.get("y", 0))
+                    w_val = float(p.get("width", 10))
+                    h_val = float(p.get("height", 10))
+                except ValueError:
+                    x_val, y_val, w_val, h_val = 0.0, 0.0, 10.0, 10.0
 
-            # Expand the farm grid boundary if a parcel is placed far out
-            if (x_val + w_val) > max_boundary_x: max_boundary_x = x_val + w_val
-            if (y_val + h_val) > max_boundary_y: max_boundary_y = y_val + h_val
+                # Must create a closed loop (5 points)
+                x_coords = [x_val, x_val + w_val, x_val + w_val, x_val, x_val]
+                y_coords = [y_val, y_val, y_val + h_val, y_val + h_val, y_val]
+                
+                # Dynamic hover text for basic rectangles
+                hover_text = f"<b>{name}</b><br>Crop: {crop}<br>Planted: {date}<br>Area: {area_str}<br>Coordinates: (X: {x_val}, Y: {y_val})<br>Size: {w_val}W x {h_val}H"
 
+            # Expand the farm grid boundary dynamically based on the largest points
+            if x_coords and max(x_coords) > max_boundary_x: 
+                max_boundary_x = max(x_coords)
+            if y_coords and max(y_coords) > max_boundary_y: 
+                max_boundary_y = max(y_coords)
+
+            # --- COLOR MAPPING ---
             block_color = "#4ade80"
             for k, v in color_map.items():
                 if k in crop.lower():
@@ -188,6 +217,138 @@ class DashboardState(rx.State):
             dragmode="pan" 
         )
         return fig
+    
+    def build_grid(self):
+        """Builds the 40x30 grid with Y=0 at the BOTTOM and marks occupied cells."""
+        from .db import is_point_in_polygon, get_polygon
+        cells = []
+        # Count backwards from 29 down to 0 so the top row is the highest number
+        for y in range(29, -1, -1):
+            for x in range(40):
+                is_occupied = False
+                point = {"x": float(x) + 0.49, "y": float(y) + 0.49}
+                for p in self.parcels:
+                    poly = get_polygon(p)
+                    if is_point_in_polygon(point, poly):
+                        is_occupied = True
+                        break
+                cells.append({"x": x, "y": y, "selected": False, "occupied": is_occupied})
+        self.grid_cells = cells
+
+    def clear_drawing(self):
+        """Resets the interactive grid to 40x30."""
+        self.temp_coordinates = []
+        self.parcel_area = ""
+        self.grid_cells = [{"x": x, "y": y, "selected": False, "occupied": False} for y in range(29, -1, -1) for x in range(40)]
+        self.build_grid()
+
+    def set_draw_mode(self, mode: str):
+        self.draw_mode = mode
+        self.clear_drawing()
+
+
+    def handle_grid_click(self, cell: dict):
+        """Handles the logic of clicking cells on the map."""
+        # FIX: Remove .to(int) because the cell values are already standard integers during the event
+        cx = int(cell["x"])
+        cy = int(cell["y"])
+        
+        if self.draw_mode == "Rectangle":
+            if len(self.temp_coordinates) == 0:
+                # First click (Top-Left Corner)
+                self.temp_coordinates = [{"x": cx, "y": cy}]
+                for c in self.grid_cells:
+                    c["selected"] = (c["x"] == cx) & (c["y"] == cy)
+            
+            elif len(self.temp_coordinates) == 1:
+                # Second click (Bottom-Right Corner)
+                start = self.temp_coordinates[0]
+                min_x, max_x = min(start["x"], cx), max(start["x"], cx)
+                min_y, max_y = min(start["y"], cy), max(start["y"], cy)
+                
+                # Save the 4 perfect corners for the DB
+                self.temp_coordinates = [
+                    {"x": min_x, "y": min_y},
+                    {"x": max_x + 1, "y": min_y},
+                    {"x": max_x + 1, "y": max_y + 1},
+                    {"x": min_x, "y": max_y + 1}
+                ]
+                
+                # Visually fill the rectangle with green on the grid
+                for c in self.grid_cells:
+                    c["selected"] = (c["x"] >= min_x) & (c["x"] <= max_x) & (c["y"] >= min_y) & (c["y"] <= max_y)
+                    
+                # Auto-calculate area based on grid units (e.g., each cell is 1 hectare)
+                w = (max_x - min_x) + 1
+                h = (max_y - min_y) + 1
+                self.parcel_area = str(float(w * h))
+            else:
+                self.clear_drawing()
+                
+        elif self.draw_mode == "Polygon":
+            # Custom Mode: Just drop pins
+            self.temp_coordinates.append({"x": cx, "y": cy})
+            
+            # Reset all selected first
+            for c in self.grid_cells:
+                c["selected"] = False
+                
+            if len(self.temp_coordinates) >= 3:
+                # 1. Area Calculation using Pick's Theorem
+                area = 0.0
+                n = len(self.temp_coordinates)
+                boundary_points = 0
+                for i in range(n):
+                    j = (i + 1) % n
+                    area += (self.temp_coordinates[i]["x"] * self.temp_coordinates[j]["y"])
+                    area -= (self.temp_coordinates[j]["x"] * self.temp_coordinates[i]["y"])
+                    
+                    dx = abs(self.temp_coordinates[j]["x"] - self.temp_coordinates[i]["x"])
+                    dy = abs(self.temp_coordinates[j]["y"] - self.temp_coordinates[i]["y"])
+                    boundary_points += math.gcd(int(dx), int(dy))
+                
+                true_area = abs(area) / 2.0 + (boundary_points / 2.0) + 1
+                self.parcel_area = str(round(true_area, 2))
+
+                # 2. Perfect Line Drawing (Bresenham's Algorithm)
+                boundary = set()
+                for i in range(n):
+                    x0, y0 = int(self.temp_coordinates[i]["x"]), int(self.temp_coordinates[i]["y"])
+                    x1, y1 = int(self.temp_coordinates[(i+1)%n]["x"]), int(self.temp_coordinates[(i+1)%n]["y"])
+                    
+                    dx = abs(x1 - x0)
+                    sx = 1 if x0 < x1 else -1
+                    dy = -abs(y1 - y0)
+                    sy = 1 if y0 < y1 else -1
+                    err = dx + dy
+                    while True:
+                        boundary.add((x0, y0))
+                        if x0 == x1 and y0 == y1:
+                            break
+                        e2 = 2 * err
+                        if e2 >= dy:
+                            err += dy
+                            x0 += sx
+                        if e2 <= dx:
+                            err += dx
+                            y0 += sy
+
+                # 3. Fill the interior cells
+                from .db import is_point_in_polygon
+                for c in self.grid_cells:
+                    ccx, ccy = int(c["x"]), int(c["y"])
+                    if (ccx, ccy) in boundary:
+                        c["selected"] = True
+                    else:
+                        point = {"x": float(ccx) + 0.5, "y": float(ccy) + 0.5}
+                        if is_point_in_polygon(point, self.temp_coordinates):
+                            c["selected"] = True
+            else:
+                # Highlight only the 1 or 2 pins dropped so far
+                for c in self.grid_cells:
+                    is_pin = any((p["x"] == c["x"] and p["y"] == c["y"]) for p in self.temp_coordinates)
+                    if is_pin:
+                        c["selected"] = True
 
     # --- COMPUTED VARIABLES ---
     @rx.var
@@ -256,6 +417,7 @@ class DashboardState(rx.State):
         self.new_height = "10"
         self.load_dashboard_data()
         self.show_parcel_modal = True
+        self.clear_drawing()
 
     # --- STAFF ACTIONS ---
     def add_employee(self):
@@ -296,51 +458,35 @@ class DashboardState(rx.State):
             self.load_dashboard_data()
             return rx.toast.success("Crop type added!")
         return rx.toast.error("Crop already exists.")
+    
+    
     def add_new_parcel(self):
+        # 1. Ensure they drew something
+        if not self.temp_coordinates:
+            return rx.toast.error("Please draw your parcel on the map grid!")
+
         if self.parcel_crop and self.parcel_crop != "None":
             if self.parcel_crop not in self.active_crop_options:
                 return rx.toast.error(f"Security Error: '{self.parcel_crop}' is deactivated and cannot be planned.")
-        if not self.parcel_name or not self.parcel_area or not self.parcel_crop or not self.parcel_date:
-            return rx.toast.error("All parcel fields are required.")
-        
-        # Ensure we pass integers for the grid coordinates
-        import re
-        try:
-            x_val = float(self.new_x) if str(self.new_x).strip() else 0.0
-            y_val = float(self.new_y) if str(self.new_y).strip() else 0.0
-            w_val = float(self.new_width) if str(self.new_width).strip() else 10.0
-            h_val = float(self.new_height) if str(self.new_height).strip() else 10.0
-        except ValueError:
-            return rx.toast.error("Grid coordinates (X, Y, Width, Height) must be numbers.")
+                
+        if not self.parcel_name or not self.parcel_area or not self.parcel_date:
+            return rx.toast.error("All parcel fields (Name, Area, Date) are required.")
 
-        # 1. Block Negative Placements
-        if x_val < 0 or y_val < 0:
-            return rx.toast.error("X and Y coordinates cannot be negative!")
-        if w_val <= 0 or h_val <= 0:
-            return rx.toast.error("Width and Height must be greater than zero!")
-        
-        # 2. Enforce Proportional Area (W * H = Area)
-        area_match = re.search(r"(\d+(\.\d+)?)", str(self.parcel_area))
-        area_val = float(area_match.group(1)) if area_match else 0.0
+        # FIX: Inflate custom shapes by 0.5 at the max/min boundaries to fully encapsulate the drawn cells
+        raw_coordinates = [{"x": float(c["x"]), "y": float(c["y"])} for c in self.temp_coordinates]
 
-        calculated_area = round(w_val * h_val, 2)
-        if abs(calculated_area - area_val) > 0.05: # Allows a tiny margin for decimal math
-            return rx.toast.error(f"Geometry Mismatch: Width ({w_val}) x Height ({h_val}) = {calculated_area} ha. This does not match your entered Area of {area_val} ha!")
-
-        # --- UPDATED: Unpack the success boolean AND the message ---
+        # 2. Save using the new Geometry Engine
+        from .db import create_parcel
         success, message = create_parcel(
             name=self.parcel_name, 
             area=self.parcel_area, 
             crop=self.parcel_crop, 
             planting_date=self.parcel_date,
-            lat=self.new_lat,
-            lng=self.new_lng,
-            x=x_val,
-            y=y_val,
-            w=w_val,
-            h=h_val,
+            lat=self.new_lat, lng=self.new_lng, 
+            x=0.0, y=0.0, w=10.0, h=10.0, # Dummy values to satisfy the legacy DB schema
             soil_type=self.new_soil_type,  
-            irrigation=self.new_irrigation 
+            irrigation=self.new_irrigation,
+            coordinates=raw_coordinates # Pass the clean Python list here!
         )
         
         if success:
@@ -348,7 +494,7 @@ class DashboardState(rx.State):
             self.load_dashboard_data()
             return rx.toast.success(message)
             
-        # REQ-2.9: Show the collision warning or DB error
+        # Show the collision warning or DB error
         return rx.toast.error(message)
     
     def open_edit_modal(self, p_id: str, p_name: str, p_area: str, p_lat: str, p_lng: str, p_x: str, p_y: str, p_w: str, p_h: str, p_soil: str, p_irrigation: bool, p_crop: str, p_date: str, p_status: str):
@@ -373,55 +519,34 @@ class DashboardState(rx.State):
         self.show_edit_modal = True
 
     def save_parcel_edits(self):
-        """Calls the DB function to update the parcel and coordinates."""
+        """Calls the DB function to update the parcel, trusting the new polygon geometry."""
         if not self.edit_name or not self.edit_area:
             return rx.toast.error("Name and Area are required.")
             
-        # Robust conversion: Default to 0/10 if empty, handle strings safely
-        import re
-        try:
-            x_val = float(self.edit_x) if str(self.edit_x).strip() else 0.0
-            y_val = float(self.edit_y) if str(self.edit_y).strip() else 0.0
-            w_val = float(self.edit_width) if str(self.edit_width).strip() else 10.0
-            h_val = float(self.edit_height) if str(self.edit_height).strip() else 10.0
-        except ValueError:
-            return rx.toast.error("Grid coordinates must be numbers.")
-        
-        # 1. Block Negative Placements
-        if x_val < 0 or y_val < 0:
-            return rx.toast.error("X and Y coordinates cannot be negative!")
-        if w_val <= 0 or h_val <= 0:
-            return rx.toast.error("Width and Height must be greater than zero!")
-
-        # 2. Enforce Proportional Area (W * H = Area)
-        area_match = re.search(r"(\d+(\.\d+)?)", str(self.edit_area))
-        area_val = float(area_match.group(1)) if area_match else 0.0
-
-        calculated_area = round(w_val * h_val, 2)
-        if abs(calculated_area - area_val) > 0.05: 
-            return rx.toast.error(f"Geometry Mismatch: Width ({w_val}) x Height ({h_val}) = {calculated_area} ha. This does not match your entered Area of {area_val} ha!")
-
         # Ensure we are importing the correct function
         if self.edit_crop and self.edit_crop != "None":
             if not self.edit_date:
                 return rx.toast.error("A Planting Date is required when assigning a new crop.")
 
+        # FIX: Inflate custom shapes by 0.5 at the max/min boundaries to fully encapsulate the drawn cells
+        raw_coordinates = [{"x": float(c["x"]), "y": float(c["y"])} for c in self.temp_coordinates]
+
         from .db import update_parcel
         
-        # --- UPDATED: Unpack the tuple to catch the collision warning ---
+        # We send 0s for the legacy x/y/w/h variables, and pass the new raw_coordinates
         success, message = update_parcel(
             str(self.edit_parcel_id), str(self.edit_name), str(self.edit_area),
-            str(self.edit_lat), str(self.edit_lng), x_val, y_val, w_val, h_val,
+            str(self.edit_lat), str(self.edit_lng), 0.0, 0.0, 10.0, 10.0,
             str(self.edit_soil_type), self.edit_irrigation,
-            str(self.edit_crop), str(self.edit_date) # NEW: Send to DB
+            str(self.edit_crop), str(self.edit_date),
+            coordinates=raw_coordinates # Pass the clean Python list here!
         )
         
         if success:
             self.show_edit_modal = False
-            self.load_dashboard_data()  # Refreshes table AND map data
+            self.load_dashboard_data()
             return rx.toast.success(f"Parcel '{self.edit_name}' updated!")
         
-        # REQ-2.9: Show the specific collision warning or DB error
         return rx.toast.error(message)
     
     def toggle_crop(self, crop_id: str, current_status_str: str):
@@ -594,7 +719,8 @@ def add_parcel_dialog():
                 
                 # Basic Info
                 rx.input(placeholder="Parcel Name (e.g., North Field 1)", on_change=DashboardState.set_parcel_name, width="100%"),
-                rx.input(placeholder="Area in Hectares (e.g., 4.2 ha)", on_change=DashboardState.set_parcel_area, width="100%"),
+                # Change the area input to use value=DashboardState.parcel_area
+                rx.input(placeholder="Area in Hectares (e.g., 4.2)", value=DashboardState.parcel_area, on_change=DashboardState.set_parcel_area, width="100%"),
                 
                 rx.cond(
                     DashboardState.has_crops,
@@ -623,14 +749,7 @@ def add_parcel_dialog():
                     width="100%"
                 ),
                 
-                # Grid Coordinates (For Collision/Expansion)
-                rx.hstack(
-                    rx.input(placeholder="Grid X", on_change=DashboardState.set_new_x, width="25%"),
-                    rx.input(placeholder="Grid Y", on_change=DashboardState.set_new_y, width="25%"),
-                    rx.input(placeholder="Width", on_change=DashboardState.set_new_width, width="25%"),
-                    rx.input(placeholder="Height", on_change=DashboardState.set_new_height, width="25%"),
-                    width="100%"
-                ),
+                interactive_drawing_grid(),
                 
                 rx.hstack(
                     rx.dialog.close(rx.button("Cancel", variant="soft", color_scheme="gray")),
@@ -997,4 +1116,42 @@ def edit_parcel_dialog():
                 ),
             ), max_width="450px",
         ), open=DashboardState.show_edit_modal, on_open_change=DashboardState.set_show_edit_modal,
+    )
+
+def interactive_drawing_grid():
+    """Generates the visual drawing tool inside the modal."""
+    return rx.vstack(
+        rx.text("Draw Parcel Location & Geometry", size="2", color="gray", weight="bold"),
+        
+        # Tools
+        rx.hstack(
+            rx.button("⬛ Rectangle", size="1", on_click=lambda: DashboardState.set_draw_mode("Rectangle"), color_scheme=rx.cond(DashboardState.draw_mode == "Rectangle", "grass", "gray")),
+            rx.button("⬡ Custom Shape", size="1", on_click=lambda: DashboardState.set_draw_mode("Polygon"), color_scheme=rx.cond(DashboardState.draw_mode == "Polygon", "blue", "gray")),
+            rx.spacer(),
+            rx.button("Reset Grid", size="1", on_click=DashboardState.clear_drawing, color_scheme="red", variant="ghost"),
+            width="100%"
+        ),
+        
+        # The CSS Matrix Grid
+        rx.grid(
+            rx.foreach(
+                DashboardState.grid_cells, 
+                lambda cell: rx.box(
+                    width="100%", height="100%",
+                    # NEW: Color it Orange if occupied, Green if selected, White if empty
+                    background_color=rx.cond(
+                        cell["selected"], "#4ade80", 
+                        rx.cond(cell["occupied"], "#fb923c", "white")
+                    ),
+                    border="1px solid #e2e8f0", cursor="crosshair",
+                    _hover={"background_color": "#bbf7d0"},
+                    on_click=lambda: DashboardState.handle_grid_click(cell)
+                )
+            ),
+            columns="40", width="100%", aspect_ratio="4/3", background_color="#f8fafc",
+            border="2px solid #1e293b", border_radius="8px", overflow="hidden", margin_y="10px"
+        ),
+        
+        rx.text("Calculated Area: ", rx.text.strong(DashboardState.parcel_area, " ha"), size="2", color="#2d5a27"),
+        width="100%"
     )

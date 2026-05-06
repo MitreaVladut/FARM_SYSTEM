@@ -44,7 +44,9 @@ class OrderState(rx.State):
         # instead of the formatted string
         success = Database.create_order(
             cart_items=clean_cart,
-            total_price=float(store_state.cart_total_price)
+            total_price=float(store_state.cart_total_price),
+            customer_email=login_state.email # <-- THIS IS THE MISSING LINE
+
         )
 
         if success:
