@@ -38,15 +38,7 @@ class StoreState(rx.State):  # pylint: disable=inherit-non-class
         self.user_role = ""
         return rx.redirect("/login")
     
-    def check_admin_permissions(self):
-        """Kicks out anyone who is NOT an Admin."""
-        if not self.authenticated or self.user_role != "Admin":
-            return rx.redirect("/login")
-
-    def check_staff_permissions(self):
-        """Kicks out anyone who is neither Staff nor Admin."""
-        if not self.authenticated or self.user_role not in ["Admin", "Staff"]:
-            return rx.redirect("/login")
+  
 
     def select_product(self, product: dict):
         """Opens the window and resets values for the chosen product."""

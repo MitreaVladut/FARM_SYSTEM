@@ -9,15 +9,7 @@ class StaffOrderState(rx.State):
     orders: list[dict] = []
     is_loading: bool = True
     search_query: str = ""
-    async def check_permissions(self):
-        self.is_loading = True
-        login_state = await self.get_state(LoginState)
-        
-        if not login_state.is_authenticated or login_state.user_role not in ["Staff", "Admin"]:
-            return rx.redirect("/login")
-        
-        self.fetch_orders()
-        self.is_loading = False
+   
 
     def fetch_orders(self):
         try:
@@ -157,48 +149,6 @@ def order_card(order: rx.Var[Dict[str, Any]]):
 
 def staff_orders_page():
     return rx.box(
-        rx.cond(
-            LoginState.is_authenticated & ( (LoginState.user_role == "Staff") | (LoginState.user_role == "Admin") ),
-            
-            # --- CONȚINUTUL VIZIBIL ---
-            # --- THE ACTUAL STAFF CONTENT ---
-            rx.vstack(
-                rx.hstack(
-                    rx.heading("Staff Dashboard - Orders", size="7"),
-                    rx.spacer(),
-                    # Add the search bar here
-                   rx.input(
-                        placeholder="🔍 Search orders by status or date (e.g., 2026-05-05)...", 
-                        on_change=StaffOrderState.set_search_query,
-                        width="380px" # Lățit pentru noul text
-                    ),
-                    rx.button("Logout", on_click=StoreState.logout, color_scheme="red"),
-                    width="100%",
-                ),
-                rx.cond(
-                    StaffOrderState.filtered_orders,
-                    rx.grid(
-                        rx.foreach(StaffOrderState.filtered_orders, order_card),
-                        columns="3",
-                        spacing="4",
-                        width="100%",
-                    ),
-                    rx.text("Ups we don't grow that", color="red", weight="bold", margin_top="20px") # REQ-8.8
-                ),
-                padding="40px",
-                width="100%",
-            ),
-            
-            # --- ECRAN DE ÎNCĂRCARE ---
-            
-            rx.center(
-                rx.vstack(
-                    rx.spinner(size="3"),
-                    rx.text("Se verifică permisiunile...", color="#1e293b"),
-                ),
-                height="100vh"
-            )
-        ),
         on_mount=StaffOrderState.check_permissions,
         width="100%",
         min_height="100vh",
