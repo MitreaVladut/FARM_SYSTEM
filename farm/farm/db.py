@@ -296,7 +296,19 @@ def get_all_parcels():
 
 # --- STAFF MANAGEMENT FUNCTIONS ---
 
+def get_all_staff():
+    """Fetches all users with the Staff role."""
+    db = Database.get_db()
+    staff = list(db.users.find({"role": "Staff"}))
+    for s in staff:
+        s["id"] = str(s.pop("_id"))
+    return staff
 
+def delete_user(user_id: str):
+    """Deletes a user from the database by their ID."""
+    db = Database.get_db()
+    # Ensure ObjectId is imported at the top: from bson.objectid import ObjectId
+    db.users.delete_one({"_id": ObjectId(user_id)})
 
 # --- PARCELS & CROPS FUNCTIONS ---
 
