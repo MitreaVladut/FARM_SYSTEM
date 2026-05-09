@@ -111,23 +111,6 @@ class Database:
             cls._client.close()
 
     @classmethod
-    def create_order(cls, cart_items: list, total_price: float, customer_email: str) -> bool:
-        """REQ-6.2: Inserts a new order into the database."""
-        import datetime
-        try:
-            db = cls.get_db()
-            order_doc = {
-                "customer_email": customer_email, # NEW: Links the order to the user!
-                "items": cart_items,
-                "total": round(total_price, 2), 
-                "status": "Created",
-                "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-            }
-            db.orders.insert_one(order_doc)
-            return True
-        except Exception as e:
-            print(f"❌ Error creating order: {e}")
-            return False
 
 # --- USER FUNCTIONS ---
 
