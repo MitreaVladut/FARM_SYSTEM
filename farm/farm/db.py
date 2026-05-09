@@ -174,7 +174,57 @@ def get_all_orders():
         order["id"] = str(order.pop("_id")) 
     return orders
 
+def update_order_status(order_id: str, new_status: str):
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        
+        # 1. Fetch the exact order
+        order = db.orders.find_one({"_id": ObjectId(order_id)})
+        if not order:
+            return False
 
+        # 2. Extract current status securely
+        current_status = str(order.get("status", "Created"))
+
+        # Define which states mean the stock is officially "out of the warehouse"
+        active_states = ["Processing", "Shipped", "Delivered"]
+
+        # 3. STOCK DEDUCTION LOGIC (e.g., Created -> Processing)
+        if current_status not in active_states and new_status in active_states:
+            items = order.get("items", [])
+            for item in items:
+                crop_name = item.get("name")
+                qty_to_deduct = float(item.get("quantity", 0))
+                
+                inv_item = db.inventory.find_one({"name": crop_name})
+                if inv_item:
+                    current_stock = float(inv_item.get("stock", 0))
+                    # Prevent negative stock
+                    new_stock = max(0, current_stock - qty_to_deduct)
+                    db.inventory.update_one({"_id": inv_item["_id"]}, {"$set": {"stock": new_stock}})
+
+        # 4. STOCK REFUND LOGIC (e.g., Processing -> Cancelled)
+        elif current_status in active_states and new_status == "Cancelled":
+            items = order.get("items", [])
+            for item in items:
+                crop_name = item.get("name")
+                qty_to_refund = float(item.get("quantity", 0))
+                
+                inv_item = db.inventory.find_one({"name": crop_name})
+                if inv_item:
+                    current_stock = float(inv_item.get("stock", 0))
+                    # Add the stock back to the warehouse
+                    new_stock = current_stock + qty_to_refund
+                    db.inventory.update_one({"_id": inv_item["_id"]}, {"$set": {"stock": new_stock}})
+
+        # 5. Update the actual order status
+        db.orders.update_one({"_id": ObjectId(order_id)}, {"$set": {"status": new_status}})
+        return True
+        
+    except Exception as e:
+        print(f"Error updating order status: {e}")
+        return False
 
 def get_season(month: int) -> str:
     """Helper to map a calendar month to a meteorological season."""
