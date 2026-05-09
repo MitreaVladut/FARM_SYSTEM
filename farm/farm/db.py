@@ -311,23 +311,7 @@ def delete_user(user_id: str):
 
 # --- PARCELS & CROPS FUNCTIONS ---
 
-def create_crop(name: str, yield_per_ha: str, growth_duration: str, planting_season: str, resources: str) -> bool:
-    """Saves a new crop type to the database (Updated with REQ-3.3, 3.4, 3.8)."""
-    try:
-        db = Database.get_db()
-        if db.crops.find_one({"name": name}):
-            return False
-        db.crops.insert_one({
-            "name": name, 
-            "yield_per_ha": yield_per_ha,          # REQ-3.5 (Already existed)
-            "growth_duration": growth_duration,    # REQ-3.3
-            "planting_season": planting_season,    # REQ-3.4
-            "resources": resources                 # REQ-3.8
-        })
-        return True
-    except Exception as e:
-        print(f"Error creating crop: {e}")
-        return False
+
 
 def get_all_crops() -> list:
     """Fetches all crop types by combining the 'crops' table and the existing 'inventory' table."""
@@ -704,23 +688,7 @@ def cancel_customer_order(order_id: str) -> bool:
         print(f"Cancel error: {e}")
         return False
     
-def toggle_crop_status(crop_id: str, new_status: bool) -> bool:
-    """REQ-3.6: Activate or deactivate a crop type."""
-    try:
-        from bson.objectid import ObjectId
-        db = Database.get_db()
-        
-        # 1. Try updating in the explicit crops table
-        result = db.crops.update_one({"_id": ObjectId(crop_id)}, {"$set": {"active": new_status}})
-        
-        # 2. If it wasn't found, it must be an auto-imported inventory item!
-        if result.matched_count == 0:
-            db.inventory.update_one({"_id": ObjectId(crop_id)}, {"$set": {"active": new_status}})
-            
-        return True
-    except Exception as e:
-        print(f"Error toggling crop: {e}")
-        return False
+
 
 def toggle_parcel_status(parcel_id: str, new_status: bool) -> bool:
     """REQ-2.1: Activate or deactivate a parcel."""
