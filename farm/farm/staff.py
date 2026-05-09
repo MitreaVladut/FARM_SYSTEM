@@ -97,20 +97,7 @@ class SalaryState(rx.State):
         total = sum(int(e["total"]) for e in self.employee_finance)
         return f"{total:,.2f} RON"
 
-    def export_salary_csv(self):
-        """Exportă raportul financiar în format CSV."""
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(["Employee Name", "Role", "Hours Worked", "Hourly Rate (RON)", "Total Gross (RON)"])
-        for e in self.employee_finance:
-            writer.writerow([e["name"], e["role"], e["hours"], e["rate"], e["total"]])
-        
-        date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-        return rx.download(
-            data=output.getvalue(),
-            filename=f"salary_report_{date_str}.csv"
-        )
-
+    
 class EmployeeState(rx.State):
     """Gestionează datele angajaților și exportul conform REQ-10.5"""
     
@@ -156,140 +143,8 @@ class EmployeeState(rx.State):
 
 # --- COMPONENTE UI (DIALOGURI) ---
 
-def schedule_dialog():
-    return rx.dialog.root(
-        rx.dialog.content(
-            rx.vstack(
-                rx.hstack(
-                    rx.dialog.title("📅 Daily Farm Schedule", size="6", color="#2d5a27"),
-                    rx.spacer(),
-                    rx.button("+ Add Task", size="2", color_scheme="grass", on_click=ScheduleState.open_new_task),
-                    width="100%", align_items="center"
-                ),
-                rx.text(f"Tasks for: {ScheduleState.current_date_str}", size="2", color="#666"),
-                
-                rx.cond(
-                    ScheduleState.daily_tasks.length() > 0,
-                    rx.table.root(
-                        rx.table.header(
-                            rx.table.row(
-                                rx.table.column_header_cell("Time"),
-                                rx.table.column_header_cell("Task"),
-                                rx.table.column_header_cell("Parcel"),
-                                rx.table.column_header_cell("Priority"),
-                                rx.table.column_header_cell("Status"),
-                                rx.table.column_header_cell("Actions"),
-                            ),
-                        ),
-                        rx.table.body(
-                            rx.foreach(ScheduleState.daily_tasks, lambda t: rx.table.row(
-                                rx.table.cell(t["time"].to(str), weight="bold"), 
-                                rx.table.cell(t["task"].to(str)), 
-                                rx.table.cell(t["parcel"].to(str)),
-                                
-                                # Priority Dropdown
-                                rx.table.cell(
-                                    rx.select(
-                                        ["Low", "Medium", "High"],
-                                        value=t["priority"].to(str),
-                                        on_change=lambda val: ScheduleState.change_priority(t["id"].to(str), val),
-                                        color_scheme=rx.cond(t["priority"] == "High", "red", rx.cond(t["priority"] == "Medium", "blue", "gray"))
-                                    )
-                                ),
-                                
-                                # Status Dropdown
-                                rx.table.cell(
-                                    rx.select(
-                                        ["Pending", "In Progress", "Completed"],
-                                        value=t["status"].to(str),
-                                        on_change=lambda val: ScheduleState.change_status(t["id"].to(str), val),
-                                        color_scheme=rx.cond(t["status"] == "Completed", "green", rx.cond(t["status"] == "In Progress", "orange", "gray")),
-                                    )
-                                ),
-                                
-                                # Edit/Delete Buttons
-                                rx.table.cell(
-                                    rx.hstack(
-                                        rx.button(rx.icon("edit", size=16), size="1", variant="ghost", color_scheme="blue", on_click=lambda: ScheduleState.open_edit_task(t["id"].to(str), t["time"].to(str), t["task"].to(str), t["parcel"].to(str), t["priority"].to(str))),
-                                        rx.button(rx.icon("trash-2", size=16), size="1", variant="ghost", color_scheme="red", on_click=lambda: ScheduleState.delete_selected_task(t["id"].to(str)))
-                                    )
-                                )
-                            ))
-                        ), width="100%", variant="surface", margin_y="15px"
-                    ),
-                    rx.text("No tasks scheduled for today.", color="gray", padding="20px")
-                ),
-                
-                rx.dialog.close(rx.button("Close Window", variant="soft", color_scheme="gray")),
-                align_items="start", width="100%"
-            ), max_width="950px" # Made wider to fit the dropdowns
-        ), open=ScheduleState.show_schedule, on_open_change=ScheduleState.set_show_schedule,
-    )
 
-def task_form_dialog():
-    return rx.dialog.root(
-        rx.dialog.content(
-            rx.vstack(
-                rx.dialog.title(rx.cond(ScheduleState.edit_task_id == "", "Add New Task", "Edit Task"), color="#2d5a27"),
-                
-                rx.text("Time", size="1", color="gray"),
-                rx.input(placeholder="e.g., 08:00", value=ScheduleState.task_time, on_change=ScheduleState.set_task_time, width="100%"),
-                
-                rx.text("Description", size="1", color="gray"),
-                rx.input(placeholder="Task details...", value=ScheduleState.task_desc, on_change=ScheduleState.set_task_desc, width="100%"),
-                
-                rx.text("Parcel (Optional)", size="1", color="gray"),
-                rx.input(placeholder="e.g., P01", value=ScheduleState.task_parcel, on_change=ScheduleState.set_task_parcel, width="100%"),
-                
-                rx.text("Priority", size="1", color="gray"),
-                rx.select(["Low", "Medium", "High"], value=ScheduleState.task_priority, on_change=ScheduleState.set_task_priority, width="100%"),
-                
-                rx.hstack(
-                    rx.dialog.close(rx.button("Cancel", variant="soft", color_scheme="gray")),
-                    rx.button("Save Task", on_click=ScheduleState.save_task, color_scheme="blue"),
-                    margin_top="15px", justify="end", width="100%"
-                )
-            ), max_width="400px"
-        ), open=ScheduleState.show_task_modal, on_open_change=ScheduleState.set_show_task_modal,
-    )
 
-def salary_report_dialog():
-    return rx.dialog.root(
-        rx.dialog.content(
-            rx.vstack(
-                rx.dialog.title("💰 Salary & Hours Report", size="6", color="#2d5a27"),
-                rx.table.root(
-                    rx.table.header(
-                        rx.table.row(
-                            rx.table.column_header_cell("Employee"),
-                            rx.table.column_header_cell("Hours"),
-                            rx.table.column_header_cell("Rate"),
-                            rx.table.column_header_cell("Total Gross"),
-                        ),
-                    ),
-                    rx.table.body(
-                        rx.foreach(SalaryState.employee_finance, lambda e: rx.table.row(
-                            rx.table.cell(e["name"].to(str)),
-                            rx.table.cell(e["hours"].to(str) + "h"),
-                            rx.table.cell(e["rate"].to(str) + " RON/h"),
-                            rx.table.cell(rx.text(e["total"].to(str) + " RON", weight="bold")),
-                        ))
-                    ), width="100%", variant="surface", margin_y="15px"
-                ),
-                rx.divider(),
-                rx.hstack(
-                    rx.text("Total Payout:", weight="bold"), rx.spacer(),
-                    rx.text(SalaryState.total_budget_needed, color="#2d5a27", size="5", weight="bold"),
-                    width="100%", padding="10px"
-                ),
-                rx.hstack(
-                    rx.button("💾 Export CSV", color_scheme="blue", variant="outline", size="2", on_click=SalaryState.export_salary_csv),
-                    rx.dialog.close(rx.button("Close", variant="soft", color_scheme="gray")),
-                    spacing="3"
-                ), align_items="end", width="100%"
-            )
-        ), open=SalaryState.show_report, on_open_change=SalaryState.set_show_report,
-    )
 
 def employee_details_dialog():
     """The pop-up window showing employee profile details."""
