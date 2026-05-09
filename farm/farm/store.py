@@ -11,12 +11,7 @@ class StoreState(rx.State):  # pylint: disable=inherit-non-class
     authenticated: bool = False
     user_role: str = ""
     
-    # Cart and Modal Logic
-    cart: list[dict] = [] 
-    show_dialog: bool = False
-    selected_product: dict = {}
-    quantity_to_add: str = "1"  # Keep as string for the input box
-    error_message: str = ""
+    
 
     @rx.var
     def cart_total_price(self) -> float:
@@ -28,9 +23,6 @@ class StoreState(rx.State):  # pylint: disable=inherit-non-class
         """Formats the sum as a readable string for the UI."""
         return f"{self.cart_total_price:.2f} RON"
 
-    def remove_item(self, index: int):
-        """Logic for the trash can: removes item by its list position."""
-        self.cart.pop(index)
         
     def logout(self):
         """Reset everything on logout."""
@@ -55,47 +47,7 @@ class StoreState(rx.State):  # pylint: disable=inherit-non-class
         self.error_message = ""
         self.show_dialog = True
 
-    def close_dialog(self):
-        self.show_dialog = False
 
-    def add_to_cart(self):
-        try:
-            qty = int(self.quantity_to_add)
-        
-            # 1. Clean the Price (e.g., "17 RON / kg" -> 17.0)
-            # This regex finds the first number (including decimals) in the string
-            price_match = re.search(r"(\d+(\.\d+)?)", str(self.selected_product.get("price", "0")))
-            unit_price = float(price_match.group(1)) if price_match else 0.0
-
-            # 2. Clean the Stock (e.g., "180 kg" or "8 pieces" -> 180 or 8)
-            stock_match = re.search(r"(\d+)", str(self.selected_product.get("stock", "0")))
-            current_stock = int(stock_match.group(1)) if stock_match else 0
-
-            # 3. Validation
-            if qty <= 0:
-                self.error_message = "Quantity must be at least 1."
-                return
-            if qty > current_stock:
-                self.error_message = f"Only {current_stock} available!"
-                return
-
-            # 4. Add to list with math already done
-            self.cart.append({
-                "name": self.selected_product["name"],
-                "price": self.selected_product["price"], # Keep the string for display
-                "quantity": qty,
-                "total": unit_price * qty # This is a pure float for the Order page
-            })
-        
-            self.show_dialog = False
-            return rx.toast.success(f"Added {qty} units to cart!")
-
-        except Exception as e:
-            self.error_message = f"Calculation error: {str(e)}"
-
-    @rx.var
-    def cart_count(self) -> int:
-        return len(self.cart)
 
     def fetch_inventory(self):
         """Called when the page loads to pull data from MongoDB."""
