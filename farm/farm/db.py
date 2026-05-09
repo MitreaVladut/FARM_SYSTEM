@@ -746,6 +746,79 @@ def delete_parcel(parcel_id: str) -> bool:
         return False
     
     # --- TASK MANAGEMENT FUNCTIONS ---
+def get_all_tasks() -> list:
+    """Fetches all daily tasks."""
+    db = Database.get_db()
+    tasks = list(db.tasks.find())
+    for t in tasks:
+        t["id"] = str(t.pop("_id"))
+    return tasks
+
+def create_task(time: str, task: str, parcel: str, priority: str) -> bool:
+    """Creates a new daily task."""
+    try:
+        db = Database.get_db()
+        db.tasks.insert_one({
+            "time": time,
+            "task": task,
+            "parcel": parcel,
+            "priority": priority,
+            "status": "Pending"
+        })
+        return True
+    except Exception as e:
+        print(f"Error creating task: {e}")
+        return False
+
+def update_task_details(task_id: str, time: str, task: str, parcel: str, priority: str) -> bool:
+    """Updates an existing task's core details."""
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        db.tasks.update_one(
+            {"_id": ObjectId(task_id)},
+            {"$set": {"time": time, "task": task, "parcel": parcel, "priority": priority}}
+        )
+        return True
+    except Exception:
+        return False
+
+def update_task_status(task_id: str, new_status: str) -> bool:
+    """Updates just the status of a task."""
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        db.tasks.update_one(
+            {"_id": ObjectId(task_id)},
+            {"$set": {"status": new_status}}
+        )
+        return True
+    except Exception:
+        return False
+        
+def update_task_priority(task_id: str, new_priority: str) -> bool:
+    """Updates just the priority of a task."""
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        db.tasks.update_one(
+            {"_id": ObjectId(task_id)},
+            {"$set": {"priority": new_priority}}
+        )
+        return True
+    except Exception:
+        return False
+
+def delete_task(task_id: str) -> bool:
+    """Removes a task completely."""
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        db.tasks.delete_one({"_id": ObjectId(task_id)})
+        return True
+    except Exception:
+        return False
+    
 
 
     # --- REPORTING & ANALYTICS FUNCTIONS ---
