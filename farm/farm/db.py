@@ -390,6 +390,7 @@ def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str,
         print(f"Error creating parcel: {e}")
         return False, "Database error while adding parcel."
 
+
 def harvest_parcel(parcel_id: str, actual_yield: float, quality_notes: str, user_name: str) -> bool:
     """Feature 4: Production Tracking with Expected Yield & Fingerprinting."""
     import re
@@ -478,6 +479,17 @@ def harvest_parcel(parcel_id: str, actual_yield: float, quality_notes: str, user
         print(f"Error harvesting parcel: {e}")
         return False
 
+def get_all_production_records() -> list:
+    """Feature 9: Fetches all production history records."""
+    try:
+        db = Database.get_db()
+        records = list(db.production_records.find())
+        for r in records:
+            r["id"] = str(r.pop("_id"))
+        return records
+    except Exception as e:
+        print(f"Error fetching production records: {e}")
+        return []
 
 
 def export_full_database() -> str:
@@ -528,7 +540,6 @@ def restore_database(json_string: str) -> bool:
         return False
     
 # --- ADVANCED GEOMETRY ENGINE (Supports Rectangles & Custom Polygons) ---
-
 
 def get_polygon(parcel_data: dict) -> list:
     """Converts any parcel into a standard list of point coordinates."""
@@ -596,7 +607,6 @@ def polygons_overlap(poly1: list, poly2: list) -> bool:
                 return True
     return False
 
-
 def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool, str]:
     """Attempts to expand a parcel, returns (Success, Message)."""
     try:
@@ -633,88 +643,6 @@ def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool
     except Exception as e:
         print(f"Expansion error: {e}")
         return False, "Database error during expansion."
-    
-
-def toggle_crop_status(crop_id: str, new_status: bool) -> bool:
-    """REQ-3.6: Activate or deactivate a crop type."""
-    try:
-        from bson.objectid import ObjectId
-        db = Database.get_db()
-        
-        # 1. Try updating in the explicit crops table
-        result = db.crops.update_one({"_id": ObjectId(crop_id)}, {"$set": {"active": new_status}})
-        
-        # 2. If it wasn't found, it must be an auto-imported inventory item!
-        if result.matched_count == 0:
-            db.inventory.update_one({"_id": ObjectId(crop_id)}, {"$set": {"active": new_status}})
-            
-        return True
-    except Exception as e:
-        print(f"Error toggling crop: {e}")
-        return False
-      
-def toggle_parcel_status(parcel_id: str, new_status: bool) -> bool:
-    """REQ-2.1: Activate or deactivate a parcel."""
-    try:
-        from bson.objectid import ObjectId
-        db = Database.get_db()
-        db.parcels.update_one({"_id": ObjectId(parcel_id)}, {"$set": {"active": new_status}})
-        return True
-    except Exception as e:
-        print(f"Error toggling parcel: {e}")
-        return False
-    
-def delete_parcel(parcel_id: str) -> bool:
-    """REQ-2.8: Deletes a parcel entirely from the database."""
-    try:
-        from bson.objectid import ObjectId
-        db = Database.get_db()
-        db.parcels.delete_one({"_id": ObjectId(parcel_id)})
-        return True
-    except Exception as e:
-        print(f"Error deleting parcel: {e}")
-        return False
-    
-def cancel_customer_order(order_id: str) -> bool:
-    """REQ-7.7: Allows a customer to reject and cancel their order."""
-    try:
-        db = Database.get_db()
-        # We ONLY allow cancellation if the status is "Created"
-        # If staff has started processing it, they must call the farm.
-        result = db.orders.update_one(
-            {"_id": ObjectId(order_id), "status": "Created"}, 
-            {"$set": {"status": "Cancelled"}}
-        )
-        # Returns True if an order was actually updated
-        return result.modified_count > 0
-    except Exception as e:
-        print(f"Cancel error: {e}")
-        return False
-    
-    # --- TASK MANAGEMENT FUNCTIONS ---
-def get_all_tasks() -> list:
-    """Fetches all daily tasks."""
-    db = Database.get_db()
-    tasks = list(db.tasks.find())
-    for t in tasks:
-        t["id"] = str(t.pop("_id"))
-    return tasks
-
-def create_task(time: str, task: str, parcel: str, priority: str) -> bool:
-    """Creates a new daily task."""
-    try:
-        db = Database.get_db()
-        db.tasks.insert_one({
-            "time": time,
-            "task": task,
-            "parcel": parcel,
-            "priority": priority,
-            "status": "Pending"
-        })
-        return True
-    except Exception as e:
-        print(f"Error creating task: {e}")
-        return False
     
 def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: float, y: float, w: float, h: float, soil_type: str, irrigation: bool, crop: str, planting_date: str, coordinates: list = None) -> tuple[bool, str]:
     """Updates a parcel with advanced Polygon collision detection."""
@@ -760,6 +688,87 @@ def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: f
     except Exception as e:
         print(f"Error updating parcel: {e}")
         return False, "Database error during update."
+    
+def cancel_customer_order(order_id: str) -> bool:
+    """REQ-7.7: Allows a customer to reject and cancel their order."""
+    try:
+        db = Database.get_db()
+        # We ONLY allow cancellation if the status is "Created"
+        # If staff has started processing it, they must call the farm.
+        result = db.orders.update_one(
+            {"_id": ObjectId(order_id), "status": "Created"}, 
+            {"$set": {"status": "Cancelled"}}
+        )
+        # Returns True if an order was actually updated
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"Cancel error: {e}")
+        return False
+    
+def toggle_crop_status(crop_id: str, new_status: bool) -> bool:
+    """REQ-3.6: Activate or deactivate a crop type."""
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        
+        # 1. Try updating in the explicit crops table
+        result = db.crops.update_one({"_id": ObjectId(crop_id)}, {"$set": {"active": new_status}})
+        
+        # 2. If it wasn't found, it must be an auto-imported inventory item!
+        if result.matched_count == 0:
+            db.inventory.update_one({"_id": ObjectId(crop_id)}, {"$set": {"active": new_status}})
+            
+        return True
+    except Exception as e:
+        print(f"Error toggling crop: {e}")
+        return False
+
+def toggle_parcel_status(parcel_id: str, new_status: bool) -> bool:
+    """REQ-2.1: Activate or deactivate a parcel."""
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        db.parcels.update_one({"_id": ObjectId(parcel_id)}, {"$set": {"active": new_status}})
+        return True
+    except Exception as e:
+        print(f"Error toggling parcel: {e}")
+        return False
+    
+def delete_parcel(parcel_id: str) -> bool:
+    """REQ-2.8: Deletes a parcel entirely from the database."""
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        db.parcels.delete_one({"_id": ObjectId(parcel_id)})
+        return True
+    except Exception as e:
+        print(f"Error deleting parcel: {e}")
+        return False
+    
+    # --- TASK MANAGEMENT FUNCTIONS ---
+def get_all_tasks() -> list:
+    """Fetches all daily tasks."""
+    db = Database.get_db()
+    tasks = list(db.tasks.find())
+    for t in tasks:
+        t["id"] = str(t.pop("_id"))
+    return tasks
+
+def create_task(time: str, task: str, parcel: str, priority: str) -> bool:
+    """Creates a new daily task."""
+    try:
+        db = Database.get_db()
+        db.tasks.insert_one({
+            "time": time,
+            "task": task,
+            "parcel": parcel,
+            "priority": priority,
+            "status": "Pending"
+        })
+        return True
+    except Exception as e:
+        print(f"Error creating task: {e}")
+        return False
 
 def update_task_details(task_id: str, time: str, task: str, parcel: str, priority: str) -> bool:
     """Updates an existing task's core details."""
@@ -813,7 +822,48 @@ def delete_task(task_id: str) -> bool:
 
 
     # --- REPORTING & ANALYTICS FUNCTIONS ---
+def get_production_vs_orders_report() -> list:
+    """Aggregates total produced quantities vs total ordered quantities per crop."""
+    try:
+        db = Database.get_db()
 
+        # 1. Total Production per Crop
+        production_records = list(db.production_records.find())
+        production_totals = {}
+        for rec in production_records:
+            crop = str(rec.get("crop", "Unknown")).strip()
+            yield_val = float(rec.get("actual_yield", 0.0))
+            production_totals[crop] = production_totals.get(crop, 0.0) + yield_val
+
+        # 2. Total Orders per Crop
+        orders = list(db.orders.find({"status": {"$ne": "Cancelled"}}))
+        order_totals = {}
+        for order in orders:
+            for item in order.get("items", []):
+                crop = str(item.get("name", "Unknown")).strip()
+                qty = float(item.get("quantity", 0.0))
+                order_totals[crop] = order_totals.get(crop, 0.0) + qty
+
+        # 3. Combine Data
+        all_crops = set(list(production_totals.keys()) + list(order_totals.keys()))
+        report_data = []
+        for crop in all_crops:
+            if crop.lower() in ["none", "unknown"]: 
+                continue
+            prod = production_totals.get(crop, 0.0)
+            ordered = order_totals.get(crop, 0.0)
+            report_data.append({
+                "crop": crop,
+                "produced": round(prod, 2),
+                "ordered": round(ordered, 2),
+                "surplus": round(prod - ordered, 2)
+            })
+
+        return sorted(report_data, key=lambda x: x["crop"])
+    except Exception as e:
+        print(f"Error generating report: {e}")
+        return []
+    
 
 def get_orders_by_user(email: str):
     """Fetches order history for a specific customer."""
