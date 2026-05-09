@@ -420,7 +420,25 @@ class DashboardState(rx.State):
         self.clear_drawing()
 
     # --- STAFF ACTIONS ---
+    def add_employee(self):
+        if not self.emp_name or not self.emp_email or not self.emp_password:
+            self.error_message = "All fields are required."
+            return
+        success = Database.create_user(email=self.emp_email, password=self.emp_password, name=self.emp_name, role="Staff")
+        if success:
+            self.show_add_modal = False
+            self.load_dashboard_data()
+            return rx.toast.success(f"Employee {self.emp_name} added successfully!")
+        self.error_message = "Email already exists or database error."
 
+    def remove_employee(self):
+        target_id = next((s.get("id") for s in self.staff_list if f"{s.get('name')} ({s.get('email')})" == self.selected_staff_option), None)
+        if target_id:
+            delete_user(target_id)
+            self.show_remove_modal = False
+            self.load_dashboard_data()
+            return rx.toast.success("Employee removed successfully!")
+        return rx.toast.error("No employee selected.")
 
     # --- CROP & PARCEL ACTIONS ---
     def add_new_crop(self):
@@ -819,6 +837,42 @@ def parcel_row(parcel: dict):
         opacity=rx.cond(is_active, "1.0", "0.5") 
     )
 
+def add_employee_dialog():
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.vstack(
+                rx.dialog.title("Add New Employee", color="#2d5a27"),
+                rx.cond(DashboardState.error_message != "", rx.text(DashboardState.error_message, color="red", size="2", weight="bold")),
+                rx.input(placeholder="Full Name", on_change=DashboardState.set_emp_name, width="100%"),
+                rx.input(placeholder="Email Address", type="email", on_change=DashboardState.set_emp_email, width="100%"),
+                rx.input(placeholder="Password", type="password", on_change=DashboardState.set_emp_password, width="100%"),
+                rx.hstack(
+                    rx.dialog.close(rx.button("Cancel", variant="soft", color_scheme="gray")),
+                    rx.button("Create Account", on_click=DashboardState.add_employee, color_scheme="grass"),
+                    spacing="3", margin_top="10px", justify="end", width="100%"
+                ),
+            ), max_width="400px",
+        ), open=DashboardState.show_add_modal, on_open_change=DashboardState.set_show_add_modal,
+    )
+
+def remove_employee_dialog():
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.vstack(
+                rx.dialog.title("Remove Employee", color="red"),
+                rx.cond(
+                    DashboardState.has_staff,
+                    rx.select(DashboardState.staff_options, value=DashboardState.selected_staff_option, on_change=DashboardState.set_selected_staff_option, width="100%", color_scheme="red"),
+                    rx.text("No active staff members found.", color="red", weight="bold")
+                ),
+                rx.hstack(
+                    rx.dialog.close(rx.button("Cancel", variant="soft", color_scheme="gray")),
+                    rx.button("Remove Account", on_click=DashboardState.remove_employee, color_scheme="red", disabled=~DashboardState.has_staff),
+                    spacing="3", margin_top="10px", justify="end", width="100%"
+                ),
+            ), max_width="450px",
+        ), open=DashboardState.show_remove_modal, on_open_change=DashboardState.set_show_remove_modal,
+    )
 
 def harvest_dialog():
     return rx.dialog.root(
