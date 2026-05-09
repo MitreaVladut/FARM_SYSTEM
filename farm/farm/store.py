@@ -6,7 +6,7 @@ from farm.login import LoginState # <-- Importul adăugat pentru a citi starea d
 
 class StoreState(rx.State):  # pylint: disable=inherit-non-class
     """Handle search and order logic for customers."""
-    
+    search_value: str = ""
     raw_inventory: list[dict] = []
     authenticated: bool = False
     user_role: str = ""
@@ -104,8 +104,33 @@ class StoreState(rx.State):  # pylint: disable=inherit-non-class
         except Exception as e:
             print(f"Error connecting to DB: {e}")
 
+    @rx.var
+    def filtered_inventory(self) -> list[dict]:
+        """REQ-8.6, REQ-8.7: Filters the DB results securely and case-insensitively."""
+        
+        # 1. Sanitize Input (REQ-8.7): 
+        safe_search = re.sub(r'[^a-zA-Z0-9\s]', '', self.search_value)
+        
+        # 2. Case-Insensitive (REQ-8.6): 
+        search_query = safe_search.strip().lower()
+        
+        # Sort inventory alphabetically
+        items = sorted(self.raw_inventory, key=lambda x: x.get("name", ""))
+        
+        if not search_query:
+            return items
+            
+        # 3. Compare the safe, lowercase search query against the lowercase product names
+        return [
+            item for item in items 
+            if search_query in str(item.get("name", "")).lower()
+        ]
+
+    @rx.var
+    def has_results(self) -> bool:
+        """Helper to determine if products exist after filtering."""
+        return len(self.filtered_inventory) > 0
     
-   
     my_orders: list[dict] = []
     show_orders_modal: bool = False
 
@@ -351,13 +376,33 @@ def storefront_page():
 
             # Search Section
             rx.center(
-                
+                rx.input(
+                    placeholder="Pick a vegetable",
+                    on_change=StoreState.set_search_value,
+                    width="600px", 
+                    margin_top="40px", 
+                    border="2px solid #2d5a27",
+                    box_shadow="lg",
+                    background_color="white",
+                    size="3",
+                    border_radius="full",
                 ),
                 width="100%",
             ),
             
             # Products Grid
-            
+            rx.cond(
+                StoreState.has_results,
+                rx.flex(
+                    rx.foreach(StoreState.filtered_inventory, product_card), 
+                    wrap="wrap", spacing="5", justify="center", padding="40px", width="100%",
+                ),
+                rx.vstack(
+                    rx.icon("sprout", size=60, color="#ccc", margin_top="50px"),
+                    rx.text("Oops, we don't grow that yet!", size="5", weight="bold", color="#666"),
+                    align="center",
+                ),
+            ),
             
             # --- NEW: Donation Banner placed at the bottom ---
             rx.box(donation_banner(), width="80%", max_width="900px"),

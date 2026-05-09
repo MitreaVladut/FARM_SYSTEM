@@ -8,6 +8,7 @@ from .store import StoreState
 class StaffOrderState(rx.State):
     orders: list[dict] = []
     is_loading: bool = True
+    search_query: str = ""
     async def check_permissions(self):
         self.is_loading = True
         login_state = await self.get_state(LoginState)
@@ -40,7 +41,21 @@ class StaffOrderState(rx.State):
         update_order_status(order_id, new_status)
         self.fetch_orders()
 
-    
+    @rx.var
+    def filtered_orders(self) -> list[dict]:
+        """REQ-8.5 & REQ-8.6: Case insensitive search by status and date."""
+        if not self.search_query:
+            return self.orders
+        
+        query = self.search_query.lower().strip()
+        # Permitem caracterele folosite în date (cratimă, punct, două puncte, slash)
+        query = "".join(e for e in query if e.isalnum() or e.isspace() or e in "-/.:")
+        
+        return [
+            o for o in self.orders 
+            if query in str(o.get("status", "")).lower()
+            or query in str(o.get("timestamp", "")).lower() # NOU: Căutare după dată
+        ]
 
 def staff_navbar():
     """Bara de navigare superioară dedicată paginilor de Staff."""
@@ -152,16 +167,30 @@ def staff_orders_page():
                     rx.heading("Staff Dashboard - Orders", size="7"),
                     rx.spacer(),
                     # Add the search bar here
-                   
+                   rx.input(
+                        placeholder="🔍 Search orders by status or date (e.g., 2026-05-05)...", 
+                        on_change=StaffOrderState.set_search_query,
+                        width="380px" # Lățit pentru noul text
+                    ),
                     rx.button("Logout", on_click=StoreState.logout, color_scheme="red"),
                     width="100%",
                 ),
-                
+                rx.cond(
+                    StaffOrderState.filtered_orders,
+                    rx.grid(
+                        rx.foreach(StaffOrderState.filtered_orders, order_card),
+                        columns="3",
+                        spacing="4",
+                        width="100%",
+                    ),
+                    rx.text("Ups we don't grow that", color="red", weight="bold", margin_top="20px") # REQ-8.8
+                ),
                 padding="40px",
                 width="100%",
             ),
             
             # --- ECRAN DE ÎNCĂRCARE ---
+            
             rx.center(
                 rx.vstack(
                     rx.spinner(size="3"),
