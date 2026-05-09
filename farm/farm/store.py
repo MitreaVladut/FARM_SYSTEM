@@ -18,16 +18,7 @@ class StoreState(rx.State):  # pylint: disable=inherit-non-class
     quantity_to_add: str = "1"  # Keep as string for the input box
     error_message: str = ""
 
-    @rx.var
-    def cart_total_price(self) -> float:
-        """Sum up the 'total' field of every item in the cart dictionary."""
-        return sum(item["total"] for item in self.cart)
-
-    @rx.var
-    def formatted_total_price(self) -> str:
-        """Formats the sum as a readable string for the UI."""
-        return f"{self.cart_total_price:.2f} RON"
-
+    
     def remove_item(self, index: int):
         """Logic for the trash can: removes item by its list position."""
         self.cart.pop(index)
