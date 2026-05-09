@@ -226,73 +226,10 @@ def update_order_status(order_id: str, new_status: str):
         print(f"Error updating order status: {e}")
         return False
 
-def get_season(month: int) -> str:
-    """Helper to map a calendar month to a meteorological season."""
-    if month in [3, 4, 5]: return "spring"
-    if month in [6, 7, 8]: return "summer"
-    if month in [9, 10, 11]: return "autumn"
-    return "winter"
+
 
 # Add this under your other functions in farm/db.py
-def get_all_parcels():
-    """REQ-2.4 & REQ-2.10: Fetch parcels, auto-update status with strict season validation, and repair coordinates."""
-    import datetime
-    db = Database.get_db()
-    parcels = list(db.parcels.find())
-    
-    today_obj = datetime.date.today()
-    today = today_obj.isoformat() 
-    current_season = get_season(today_obj.month)
 
-    print(f"🕒 [SYSTEM TIME] Today is: {today} | Season: {current_season.upper()}")
-
-    # Build a quick lookup dictionary of { "Crop Name" : "Season String" }
-    crop_seasons = {c["name"]: str(c.get("planting_season", "")).lower() for c in db.crops.find()}
-
-    for parcel in parcels:
-        parcel_id = parcel["_id"]
-        current_status = str(parcel.get("status", ""))
-        p_date = str(parcel.get("planting_date", "None"))
-        crop_name = str(parcel.get("crop", "Unknown"))
-
-        # --- REQ-2.10: Complex Season Validation ---
-        if current_status == "Planned" and p_date != "None" and today >= p_date:
-            c_season = crop_seasons.get(crop_name, "")
-            
-            is_match = True
-            if c_season: # Only validate if the crop actually has a defined season
-                match_words = [current_season]
-                if current_season == "autumn": match_words.append("fall") # Catch synonyms
-                
-                # Check if the current season is mentioned anywhere in the crop's string
-                is_match = any(word in c_season for word in match_words)
-            
-            if is_match:
-                new_status = "In Production"
-                db.parcels.update_one({"_id": parcel_id}, {"$set": {"status": new_status}})
-                parcel["status"] = new_status
-            else:
-                # BLOCK ACTIVATED! The DB stays "Planned", but we warn the UI.
-                print(f"⚠️ [REQ-2.10] Blocked '{parcel.get('name')}'. {current_season.upper()} does not match '{c_season}'.")
-                parcel["status"] = "Season Locked"
-
-        # --- Spatial Geometry Repair ---
-        needs_repair = False
-        updates = {}
-        for coord in ["x", "y"]:
-            if coord not in parcel:
-                parcel[coord], updates[coord], needs_repair = 0, 0, True
-        for dim in ["width", "height"]:
-            if dim not in parcel:
-                parcel[dim], updates[dim], needs_repair = 10, 10, True
-                
-        if needs_repair:
-            db.parcels.update_one({"_id": parcel_id}, {"$set": updates})
-
-        parcel["id"] = str(parcel.pop("_id"))
-        parcel["active"] = "true" if parcel.get("active", True) else "false"
-        
-    return parcels
 # --- STAFF MANAGEMENT FUNCTIONS ---
 
 def get_all_staff():
@@ -359,35 +296,6 @@ def get_all_crops() -> list:
 
     return combined_crops
 
-def create_parcel(name: str, area: str, crop: str, planting_date: str, lat: str, lng: str, x: float, y: float, w: float, h: float, soil_type: str, irrigation: bool, coordinates: list = None) -> tuple[bool, str]:
-    """Saves a new land parcel with advanced Polygon collision detection."""
-    try:
-        db = Database.get_db()
-        
-        # 1. Define the proposed shape (Handles both rectangles and custom polygons)
-        proposed_parcel = {"x": float(x), "y": float(y), "width": float(w), "height": float(h), "coordinates": coordinates}
-        proposed_poly = get_polygon(proposed_parcel)
-        
-        # 2. Check for collisions against all existing parcels
-        existing_parcels = list(db.parcels.find())
-        for other in existing_parcels:
-            other_poly = get_polygon(other)
-            if polygons_overlap(proposed_poly, other_poly):
-                return False, f"Collision detected! Space occupied by '{other.get('name', 'another parcel')}'."
-
-        # 3. If no overlap, proceed with creation
-        status = "Available" if crop == "None" or not crop else "Planned"
-        db.parcels.insert_one({
-            "name": name, "area": area, "crop": crop, "planting_date": planting_date,
-            "status": status, "latitude": lat, "longitude": lng,
-            "x": float(x), "y": float(y), "width": float(w), "height": float(h),
-            "coordinates": coordinates, # NEW: Save custom shape geometry
-            "soil_type": soil_type, "irrigation": irrigation
-        })
-        return True, "Parcel created successfully!"
-    except Exception as e:
-        print(f"Error creating parcel: {e}")
-        return False, "Database error while adding parcel."
 
 
 def harvest_parcel(parcel_id: str, actual_yield: float, quality_notes: str, user_name: str) -> bool:
@@ -540,71 +448,9 @@ def restore_database(json_string: str) -> bool:
     
 # --- ADVANCED GEOMETRY ENGINE (Supports Rectangles & Custom Polygons) ---
 
-def get_polygon(parcel_data: dict) -> list:
-    """Converts any parcel into a standard list of point coordinates."""
-    if "coordinates" in parcel_data and parcel_data["coordinates"]:
-        return parcel_data["coordinates"]
-    
-    # Safely convert old legacy parcels to avoid ValueError crashes
-    try:
-        x = float(parcel_data.get("x") or 0)
-        y = float(parcel_data.get("y") or 0)
-        w = float(parcel_data.get("width") or 10)
-        h = float(parcel_data.get("height") or 10)
-    except (ValueError, TypeError):
-        x, y, w, h = 0.0, 0.0, 10.0, 10.0
-        
-    return [
-        {"x": x, "y": y}, 
-        {"x": x + w, "y": y}, 
-        {"x": x + w, "y": y + h}, 
-        {"x": x, "y": y + h}
-    ]
 
-def is_point_in_polygon(point: dict, polygon: list) -> bool:
-    """Ray-casting algorithm to mathematically check if a point is inside a polygon."""
-    if not polygon or len(polygon) < 3: return False
-    
-    x, y = point['x'], point['y']
-    inside = False
-    n = len(polygon)
-    p1x, p1y = polygon[0]['x'], polygon[0]['y']
-    
-    for i in range(1, n + 1):
-        p2x, p2y = polygon[i % n]['x'], polygon[i % n]['y']
-        if y > min(p1y, p2y):
-            if y <= max(p1y, p2y):
-                if x <= max(p1x, p2x):
-                    if p1y != p2y: # Avoid division by zero on horizontal lines
-                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                        # FIX: This check must be indented inside the p1y != p2y block!
-                        if p1x == p2x or x <= xinters:
-                            inside = not inside
-        p1x, p1y = p2x, p2y
-    return inside
 
-def _ccw(A, B, C):
-    """Helper for edge intersection."""
-    return (C['y'] - A['y']) * (B['x'] - A['x']) > (B['y'] - A['y']) * (C['x'] - A['x'])
 
-def _segments_intersect(A, B, C, D):
-    """Checks if two lines cross each other."""
-    return _ccw(A, C, D) != _ccw(B, C, D) and _ccw(A, B, C) != _ccw(A, B, D)
-
-def polygons_overlap(poly1: list, poly2: list) -> bool:
-    """Checks if two shapes overlap using point-in-polygon and edge intersection."""
-    # 1. Check if any point of shape 1 is inside shape 2
-    for p in poly1:
-        if is_point_in_polygon(p, poly2): return True
-    # 2. Check if any point of shape 2 is inside shape 1
-    for p in poly2:
-        if is_point_in_polygon(p, poly1): return True
-    # 3. Check if any boundaries cross
-    for i in range(len(poly1)):
-        for j in range(len(poly2)):
-            if _segments_intersect(poly1[i], poly1[(i+1)%len(poly1)], poly2[j], poly2[(j+1)%len(poly2)]):
-                return True
-    return False
 
 def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool, str]:
     """Attempts to expand a parcel, returns (Success, Message)."""
@@ -643,50 +489,6 @@ def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool
         print(f"Expansion error: {e}")
         return False, "Database error during expansion."
     
-def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: float, y: float, w: float, h: float, soil_type: str, irrigation: bool, crop: str, planting_date: str, coordinates: list = None) -> tuple[bool, str]:
-    """Updates a parcel with advanced Polygon collision detection."""
-    try:
-        from bson.objectid import ObjectId
-        db = Database.get_db()
-        
-        existing_parcel = db.parcels.find_one({"_id": ObjectId(parcel_id)})
-        if not existing_parcel:
-            return False, "Parcel not found."
-            
-        current_status = existing_parcel.get("status", "Available")
-        
-        if current_status == "In Production":
-            if crop != existing_parcel.get("crop") or planting_date != existing_parcel.get("planting_date"):
-                return False, "Security Block: Cannot modify crop or date while In Production!"
-            new_status = "In Production"
-        else:
-            new_status = "Available" if crop == "None" or not crop else "Planned"
-
-        # Geometry Checks
-        proposed_parcel = {"x": float(x), "y": float(y), "width": float(w), "height": float(h), "coordinates": coordinates}
-        proposed_poly = get_polygon(proposed_parcel)
-        other_parcels = list(db.parcels.find({"_id": {"$ne": ObjectId(parcel_id)}}))
-        
-        for other in other_parcels:
-            other_poly = get_polygon(other)
-            if polygons_overlap(proposed_poly, other_poly):
-                return False, f"Collision detected! Overlaps with '{other.get('name', 'another parcel')}'."
-
-        db.parcels.update_one(
-            {"_id": ObjectId(parcel_id)},
-            {"$set": {
-                "name": name, "area": area, "latitude": lat, "longitude": lng,
-                "x": float(x), "y": float(y), "width": float(w), "height": float(h),
-                "coordinates": coordinates, # NEW: Save custom shape geometry
-                "soil_type": soil_type, "irrigation": irrigation,
-                "crop": crop, "planting_date": planting_date,
-                "status": new_status                          
-            }}
-        )
-        return True, f"Parcel '{name}' updated successfully!"
-    except Exception as e:
-        print(f"Error updating parcel: {e}")
-        return False, "Database error during update."
 
 def toggle_crop_status(crop_id: str, new_status: bool) -> bool:
     """REQ-3.6: Activate or deactivate a crop type."""
@@ -724,27 +526,9 @@ def cancel_customer_order(order_id: str) -> bool:
     
 
 
-def toggle_parcel_status(parcel_id: str, new_status: bool) -> bool:
-    """REQ-2.1: Activate or deactivate a parcel."""
-    try:
-        from bson.objectid import ObjectId
-        db = Database.get_db()
-        db.parcels.update_one({"_id": ObjectId(parcel_id)}, {"$set": {"active": new_status}})
-        return True
-    except Exception as e:
-        print(f"Error toggling parcel: {e}")
-        return False
+
     
-def delete_parcel(parcel_id: str) -> bool:
-    """REQ-2.8: Deletes a parcel entirely from the database."""
-    try:
-        from bson.objectid import ObjectId
-        db = Database.get_db()
-        db.parcels.delete_one({"_id": ObjectId(parcel_id)})
-        return True
-    except Exception as e:
-        print(f"Error deleting parcel: {e}")
-        return False
+
     
     # --- TASK MANAGEMENT FUNCTIONS ---
 def get_all_tasks() -> list:
