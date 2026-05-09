@@ -962,7 +962,6 @@ def dashboard_page():
                 rx.button("Warehouse Logistics", color_scheme="purple", size="2", on_click=rx.redirect("/admin/inventory")),
                 rx.button("+ Add Employee", color_scheme="blue", size="2", on_click=DashboardState.open_add_modal),
                 rx.button("- Remove Employee", color_scheme="red", size="2", on_click=DashboardState.open_remove_modal),
-                rx.button("System Backup", color_scheme="red", size="2", on_click=rx.redirect("/admin/backup")),
                 spacing="3", padding_y="10px",
             ),
 

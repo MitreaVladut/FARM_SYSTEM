@@ -492,52 +492,6 @@ def get_all_production_records() -> list:
         return []
 
 
-def export_full_database() -> str:
-    """REQ-10.1, 10.2: Exports complete configuration and records."""
-    try:
-        db = Database.get_db()
-        # We exclude '_id' because MongoDB generates new ones automatically 
-        # and we don't want conflicts when importing.
-        backup_data = {
-            "parcels": list(db.parcels.find({}, {"_id": 0})),
-            "crops": list(db.crop_types.find({}, {"_id": 0})) if "crop_types" in db.list_collection_names() else [],
-            "inventory": list(db.inventory.find({}, {"_id": 0})),
-            "production_records": list(db.production_records.find({}, {"_id": 0})),
-            "orders": list(db.orders.find({}, {"_id": 0}))
-        }
-        # Format as a pretty JSON string
-        return json.dumps(backup_data, indent=4)
-    except Exception as e:
-        print(f"Export error: {e}")
-        return ""
-
-def restore_database(json_string: str) -> bool:
-    """REQ-10.6, 10.7: Import and validate the backup file."""
-    try:
-        data = json.loads(json_string)
-        
-        # REQ-10.7: File Validation. Ensure the file has the correct structure.
-        if not isinstance(data, dict) or "parcels" not in data or "production_records" not in data:
-            print("Validation failed: Missing required core collections.")
-            return False
-            
-        db = Database.get_db()
-        
-        # Danger Zone: Clear existing data before restoring
-        # We DO NOT clear the 'users' table so admins don't lock themselves out!
-        for collection_name in ["parcels", "crop_types", "inventory", "production_records", "orders"]:
-            if collection_name in data and isinstance(data[collection_name], list):
-                db[collection_name].delete_many({}) # Wipe current data
-                if data[collection_name]:           # If backup has data, insert it
-                    db[collection_name].insert_many(data[collection_name])
-                    
-        return True
-    except json.JSONDecodeError:
-        print("Validation failed: Not a valid JSON file.")
-        return False
-    except Exception as e:
-        print(f"Restore error: {e}")
-        return False
     
 # --- ADVANCED GEOMETRY ENGINE (Supports Rectangles & Custom Polygons) ---
 
