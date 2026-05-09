@@ -131,29 +131,6 @@ class StoreState(rx.State):  # pylint: disable=inherit-non-class
         """Helper to determine if products exist after filtering."""
         return len(self.filtered_inventory) > 0
     
-    my_orders: list[dict] = []
-    show_orders_modal: bool = False
-
-    async def load_my_orders(self):
-        """Fetches orders for the logged-in user."""
-        # 1. Safely check the actual LoginState
-        login_state = await self.get_state(LoginState)
-        if not login_state.is_authenticated:
-            return rx.toast.error("You must be logged in to view orders.")
-            
-        # 2. Fetch data and open the modal
-        from .db import get_all_orders 
-        all_orders = get_all_orders()
-        self.my_orders = [o for o in all_orders if o.get("status") in ["Created", "Cancelled"]]
-        self.show_orders_modal = True
-
-    async def cancel_my_order(self, order_id: str):
-        from .db import cancel_customer_order
-        success = cancel_customer_order(order_id)
-        if success:
-            await self.load_my_orders() # Refresh list
-            return rx.toast.success("Order has been successfully cancelled.")
-        return rx.toast.error("Cannot cancel this order (it may already be processed).")
     
 
 def quantity_dialog():
@@ -331,33 +308,6 @@ def donation_banner():
         ),
         width="100%", margin_top="40px", margin_bottom="40px", padding="20px", 
         background_color="#f0fdf4", border="1px solid #bbf7d0"
-    )
-
-def order_history_row(order: dict):
-    """Displays a single order in the history modal."""
-    # REQ-7.7: We only allow cancellation if the order is still "Created"
-    is_created = (order["status"] == "Created")
-    
-    return rx.table.row(
-        rx.table.row_header_cell(order["id"].to(str)[:6].upper() + "..."),
-        rx.table.cell(order["timestamp"].to(str)),
-        rx.table.cell(f"{order['total'].to(str)} RON", weight="bold"),
-        rx.table.cell(
-            rx.badge(
-                order["status"].to(str), 
-                color_scheme=rx.cond(is_created, "blue", rx.cond(order["status"] == "Cancelled", "red", "green"))
-            )
-        ),
-        rx.table.cell(
-            rx.button(
-                "Cancel", 
-                size="1", 
-                color_scheme="red", 
-                variant="soft",
-                disabled=~is_created, # Disable the button if it's already cancelled or processing
-                on_click=lambda: StoreState.cancel_my_order(order["id"].to(str))
-            )
-        ),
     )
 
 

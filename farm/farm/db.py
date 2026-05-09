@@ -689,21 +689,7 @@ def update_parcel(parcel_id: str, name: str, area: str, lat: str, lng: str, x: f
         print(f"Error updating parcel: {e}")
         return False, "Database error during update."
     
-def cancel_customer_order(order_id: str) -> bool:
-    """REQ-7.7: Allows a customer to reject and cancel their order."""
-    try:
-        db = Database.get_db()
-        # We ONLY allow cancellation if the status is "Created"
-        # If staff has started processing it, they must call the farm.
-        result = db.orders.update_one(
-            {"_id": ObjectId(order_id), "status": "Created"}, 
-            {"$set": {"status": "Cancelled"}}
-        )
-        # Returns True if an order was actually updated
-        return result.modified_count > 0
-    except Exception as e:
-        print(f"Cancel error: {e}")
-        return False
+
     
 def toggle_crop_status(crop_id: str, new_status: bool) -> bool:
     """REQ-3.6: Activate or deactivate a crop type."""
@@ -865,11 +851,3 @@ def get_production_vs_orders_report() -> list:
         return []
     
 
-def get_orders_by_user(email: str):
-    """Fetches order history for a specific customer."""
-    db = Database.get_db()
-    # Find orders where the customer_email matches
-    orders = list(db.orders.find({"customer_email": email}))
-    for order in orders:
-        order["id"] = str(order.pop("_id"))
-    return orders
