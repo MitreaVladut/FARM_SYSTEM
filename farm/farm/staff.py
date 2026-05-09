@@ -137,22 +137,7 @@ class EmployeeState(rx.State):
     def close_details_modal(self):
         self.show_details_modal = False
 
-    def export_employee_list(self):
-        """Generează și descarcă un fișier CSV cu lista angajaților."""
-        output = io.StringIO()
-        writer = csv.writer(output)
-        # Scriem capul de tabel
-        writer.writerow(["Employee ID", "Full Name", "Role", "Hire Date", "Status"])
-        # Scriem datele
-        for emp in self.employees:
-            writer.writerow([emp["id"], emp["name"], emp["role"], emp["hire_date"], emp["status"]])
-        
-        # Numele fișierului primește data curentă automat
-        date_str = datetime.datetime.now().strftime("%Y-%m-%d")
-        return rx.download(
-            data=output.getvalue(),
-            filename=f"employee_list_{date_str}.csv"
-        )
+    
 
 # --- COMPONENTE UI (DIALOGURI) ---
 
@@ -291,38 +276,7 @@ def salary_report_dialog():
         ), open=SalaryState.show_report, on_open_change=SalaryState.set_show_report,
     )
 
-def employee_details_dialog():
-    """The pop-up window showing employee profile details."""
-    return rx.dialog.root(
-        rx.dialog.content(
-            rx.vstack(
-                rx.dialog.title("👤 Employee Profile", size="6", color="#2d5a27"),
-                rx.hstack(
-                    rx.icon("user-circle", size=60, color="#64748b"),
-                    rx.vstack(
-                        rx.heading(EmployeeState.selected_employee["name"].to(str), size="5"),
-                        rx.text(f"ID: {EmployeeState.selected_employee['id'].to(str)}", color="gray"),
-                        align_items="start", spacing="1"
-                    ),
-                    spacing="4", align_items="center", padding_bottom="15px"
-                ),
-                rx.divider(),
-                rx.text(rx.text.strong("Role: "), EmployeeState.selected_employee["role"].to(str)),
-                rx.text(rx.text.strong("Hire Date: "), EmployeeState.selected_employee["hire_date"].to(str)),
-                rx.text(rx.text.strong("Current Status: "), 
-                    rx.badge(EmployeeState.selected_employee["status"].to(str), 
-                             color_scheme=rx.cond(EmployeeState.selected_employee["status"] == "Active", "green", "gray"))
-                ),
-                rx.hstack(
-                    rx.spacer(),
-                    rx.dialog.close(rx.button("Close Window", variant="soft", color_scheme="gray")),
-                    margin_top="20px", width="100%"
-                ),
-                align_items="start", width="100%"
-            ), max_width="400px"
-        ), open=EmployeeState.show_details_modal, on_open_change=EmployeeState.set_show_details_modal,
-    )
-# --- PAGINA PRINCIPALĂ ---
+
 
 def stat_card(label: str, value: str, color: str = "grass"):
     return rx.card(
@@ -333,27 +287,6 @@ def stat_card(label: str, value: str, color: str = "grass"):
         ), width="220px", padding="20px", style={"background_color": "white", "border_radius": "10px"}
     )
 
-def employee_row(emp: dict):
-    """Componentă separată pentru a genera rândurile tabelului de angajați dinamic."""
-    return rx.table.row(
-        rx.table.cell(emp["id"], color="black"), 
-        rx.table.cell(emp["name"], color="black"), 
-        rx.table.cell(emp["role"], color="black"),
-        rx.table.cell(emp["hire_date"], color="black"), 
-        rx.table.cell(
-            emp["status"], 
-            color=rx.cond(emp["status"] == "Active", "green", rx.cond(emp["status"] == "Inactive", "red", "blue")), 
-            weight="bold"
-        ),
-        rx.table.cell(
-            rx.button(
-                "Details", 
-                size="1", 
-                color_scheme="green",
-                on_click=lambda: EmployeeState.open_employee_details(emp["id"].to(str))
-            )
-        )
-    )
 
 @require_staff_or_admin
 def staff_page():
