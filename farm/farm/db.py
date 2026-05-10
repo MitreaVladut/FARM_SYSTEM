@@ -498,38 +498,73 @@ def export_full_database() -> str:
         db = Database.get_db()
         # We exclude '_id' because MongoDB generates new ones automatically 
         # and we don't want conflicts when importing.
-        backup_data = {
-            "parcels": list(db.parcels.find({}, {"_id": 0})),
-            "crops": list(db.crop_types.find({}, {"_id": 0})) if "crop_types" in db.list_collection_names() else [],
-            "inventory": list(db.inventory.find({}, {"_id": 0})),
-            "production_records": list(db.production_records.find({}, {"_id": 0})),
-            "orders": list(db.orders.find({}, {"_id": 0}))
+        def serialize_docs(cursor):
+            docs = list(cursor)
+            for doc in docs:
+                if "_id" in doc:
+                    doc["_id"] = str(doc["_id"])
+            return docs
+
+        export_data = {
+            "metadata": {
+                # FIX: Added the extra '.datetime.' to properly call the module
+                "timestamp": datetime.datetime.now().isoformat(), 
+                "version": "1.0"
+            },
+            "crops": serialize_docs(db.crops.find({})),
+            "parcels": serialize_docs(db.parcels.find({})),
+            "inventory": serialize_docs(db.inventory.find({})),
+            "orders": serialize_docs(db.orders.find({})),
+            # [REQ-10.2] Production records included in export
+            "production_records": serialize_docs(db.production_records.find({})), 
+            "tasks": serialize_docs(db.tasks.find({}))
         }
         # Format as a pretty JSON string
-        return json.dumps(backup_data, indent=4)
+        return json.dumps(export_data, indent=4)
     except Exception as e:
         print(f"Export error: {e}")
         return ""
-
+    
+    
 def restore_database(json_string: str) -> bool:
     """REQ-10.6, 10.7: Import and validate the backup file."""
     try:
         data = json.loads(json_string)
         
-        # REQ-10.7: File Validation. Ensure the file has the correct structure.
-        if not isinstance(data, dict) or "parcels" not in data or "production_records" not in data:
-            print("Validation failed: Missing required core collections.")
-            return False
+        # --- [REQ-10.7] STRICT FILE VALIDATION ---
+        if not isinstance(data, dict):
+            return False, "Validation Error: The uploaded file is not a valid JSON dictionary."
             
+        if "metadata" not in data:
+            return False, "Validation Error: Missing metadata. File might be corrupted."
+
+        # Define the exact collections the system expects
+        required_collections = ["crops", "parcels", "inventory", "orders", "production_records", "tasks"]
+        
+        for col in required_collections:
+            if col not in data:
+                return False, f"Validation Error: Missing required system collection '{col}'."
+            if not isinstance(data[col], list):
+                return False, f"Validation Error: Collection '{col}' has invalid data formatting. Expected a list."
+        # ------------------------------------------
+
         db = Database.get_db()
         
-        # Danger Zone: Clear existing data before restoring
-        # We DO NOT clear the 'users' table so admins don't lock themselves out!
-        for collection_name in ["parcels", "crop_types", "inventory", "production_records", "orders"]:
-            if collection_name in data and isinstance(data[collection_name], list):
-                db[collection_name].delete_many({}) # Wipe current data
-                if data[collection_name]:           # If backup has data, insert it
-                    db[collection_name].insert_many(data[collection_name])
+        for col in required_collections:
+            # 1. Clear existing collection
+            db[col].delete_many({})
+            
+            # 2. Insert new data (if it contains items)
+            if len(data[col]) > 0:
+                # Remove the stringified _id so MongoDB generates fresh ObjectIds
+                # (or keeps them if you want identical matching)
+                clean_docs = []
+                for item in data[col]:
+                    if "_id" in item:
+                        del item["_id"]
+                    clean_docs.append(item)
+                    
+                db[col].insert_many(clean_docs)
                     
         return True
     except json.JSONDecodeError:
