@@ -1,0 +1,6 @@
+passlib[bcrypt]>=1.7.4
+pymongo>=4.16.0
+python-dotenv>=1.2.2
+reflex>=0.8.28.post1
+pytest>=7.0.0
+pytest-mock>=3.10.0

@@ -9,4 +9,16 @@ dependencies = [
     "pymongo>=4.16.0",
     "python-dotenv>=1.2.2",
     "reflex>=0.8.28.post1",
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["farm*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
