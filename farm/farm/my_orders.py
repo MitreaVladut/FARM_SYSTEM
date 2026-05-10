@@ -121,8 +121,8 @@ def my_orders_page():
         
         # Main Content
         rx.vstack(
-            rx.heading("Order History & Live Tracking", size="7", color="#1e293b", margin_bottom="10px"),
-            rx.text("Track the progress of your farm-fresh deliveries in real time.", color="gray", margin_bottom="30px"),
+            rx.heading("Order History & Live Tracking", size="7", color="#fafafa", margin_bottom="10px"),
+            rx.text("Track the progress of your farm-fresh deliveries in real time.", color="white", margin_bottom="30px"),
             
             rx.cond(
                 MyOrdersState.my_orders.length() > 0,
@@ -143,5 +143,10 @@ def my_orders_page():
             width="100%", max_width="900px", margin="0 auto", padding="40px"
         ),
         on_mount=MyOrdersState.load_orders,
-        background_color="#f8fafc", min_height="100vh"
+        background_image="url('/Iarba.png')",
+        background_size="cover",
+        background_position="center",
+        background_attachment="fixed",
+        box_shadow="inset 0 0 0 2000px rgba(0, 0, 0, 0.5)", 
+        min_height="100vh",
     )

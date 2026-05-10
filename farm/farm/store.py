@@ -196,7 +196,7 @@ def quantity_dialog():
                     rx.button(
                         "Confirm Add", 
                         on_click=StoreState.add_to_cart,
-                        background_color="#2d5a27",
+                        background_color="#1b3618",
                         color="white"
                     ),
                     spacing="3",
@@ -222,7 +222,7 @@ def product_card(product: rx.Var[dict]):
             ),
             rx.vstack(
                 rx.text(product["name"], size="4", weight="bold", color="#1e293b"),
-                rx.text(product["price"], size="3", weight="bold", color="#2d5a27"),
+                rx.text(product["price"], size="3", weight="bold", color="#1b3618"),
                 
                 # REQ-5.2: Clearly display remaining quantities in stock
                 rx.badge(
@@ -238,7 +238,7 @@ def product_card(product: rx.Var[dict]):
                 on_click=lambda: StoreState.select_product(product),
                 width="100%",
                 style={
-                    "background_color": rx.cond(is_out_of_stock, "#b10000", "#2d5a27"),
+                    "background_color": rx.cond(is_out_of_stock, "#b10000", "#1b3618"),
                     "color": "white",
                     "font_weight": "bold",
                     "_hover": {"transform": "scale(1.02)", "transition": "0.2s"}
@@ -267,6 +267,7 @@ def navbar():
 
                 rx.button("My Orders", on_click=rx.redirect("/my-orders"), color_scheme="blue", variant="solid"), 
                 
+                
                 # Afișăm butonul către panoul de control DOAR pentru Admin sau Staff
                 rx.cond(
                     LoginState.user_role == "Admin",
@@ -281,15 +282,16 @@ def navbar():
                 rx.button("Logout", on_click=LoginState.logout, color_scheme="red", variant="solid"),
                 align_items="center",
                 spacing="4"
+                
             ),
             
             # UI pentru vizitator NECONECTAT (doar butonul de Login)
-            rx.button("Login", on_click=rx.redirect("/login"), size="2", variant="solid", background_color="white", color="#2d5a27")
+            rx.button("Login", on_click=rx.redirect("/login"), size="2", variant="solid", background_color="white", color="#1b3618")
         ),
         
         width="100%",
         padding="15px 30px",
-        background_color="#2d5a27", # Păstrăm tema verde
+        background_color="#1b3618", # Păstrăm tema verde
         align_items="center"
     )
     
@@ -297,9 +299,9 @@ def farm_info_banner():
     """REQ-5.4: Displays information about the producing farm."""
     return rx.card(
         rx.hstack(
-            rx.icon("tractor", size=40, color="#2d5a27"),
+            rx.icon("tractor", size=40, color="#1b3618"),
             rx.vstack(
-                rx.heading("About Our Farm", size="5", color="#2d5a27"),
+                rx.heading("About Our Farm", size="5", color="#1b3618"),
                 rx.text(
                     "Located in Romania, our farm spans over many hectares "
                     "of rich, fertile soil. We are committed to sustainable, eco-friendly agriculture, "
@@ -317,9 +319,9 @@ def donation_banner():
     """Displays information about the farm's donation pledge at the bottom of the page."""
     return rx.card(
         rx.hstack(
-            rx.icon("heart-handshake", size=40, color="#2d5a27"),
+            rx.icon("heart-handshake", size=40, color="#1b3618"),
             rx.vstack(
-                rx.heading("Our Pledge to Nature", size="5", color="#2d5a27"),
+                rx.heading("Our Pledge to Nature", size="5", color="#1b3618"),
                 rx.text(
                     "1% of our monthly revenue will be donated along with the excess produces "
                     'to "The natural reservation of Buffalos" from the Retezat Mountains.',
@@ -381,7 +383,7 @@ def storefront_page():
                     on_change=StoreState.set_search_value,
                     width="600px", 
                     margin_top="40px", 
-                    border="2px solid #2d5a27",
+                    border="2px solid #1b3618",
                     box_shadow="lg",
                     background_color="white",
                     size="3",
@@ -421,5 +423,11 @@ def storefront_page():
             width="100%", align="center",
         ),
         on_mount=StoreState.fetch_inventory,
-        background_color="#f8fafc", min_height="100vh",
+        # --- NEW BACKGROUND IMAGE LOGIC ---
+        background_image="url('/Iarba.png')",
+        background_size="cover",
+        background_position="center",
+        background_attachment="fixed",
+        box_shadow="inset 0 0 0 2000px rgba(0, 0, 0, 0.4)", # Dark overlay to make text readable
+        min_height="100vh",
     )
