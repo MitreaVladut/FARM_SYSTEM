@@ -645,6 +645,7 @@ def polygons_overlap(poly1: list, poly2: list) -> bool:
 def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool, str]:
     """Attempts to expand a parcel, returns (Success, Message)."""
     try:
+        from bson.objectid import ObjectId # Ensure this is here
         db = Database.get_db()
         
         # 1. Get the parcel we want to expand
@@ -660,6 +661,9 @@ def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool
             "height": new_height
         }
         
+        # FIX: We must generate the polygon coordinates from the shape!
+        proposed_poly = get_polygon(proposed_shape) 
+        
         # 2. Get all OTHER parcels
         other_parcels = list(db.parcels.find({"_id": {"$ne": ObjectId(parcel_id)}}))
         
@@ -668,6 +672,7 @@ def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool
             other_poly = get_polygon(other)
             if polygons_overlap(proposed_poly, other_poly):
                 return False, f"You can't expand this parcel, it would overlap with {other.get('name', 'another parcel')}!"
+                
         # 4. If no overlaps, save the new size!
         db.parcels.update_one(
             {"_id": ObjectId(parcel_id)},
