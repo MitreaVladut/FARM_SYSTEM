@@ -665,9 +665,9 @@ def expand_parcel(parcel_id: str, new_width: int, new_height: int) -> tuple[bool
         
         # 3. Check for collisions
         for other in other_parcels:
-            if is_overlapping(proposed_shape, other):
+            other_poly = get_polygon(other)
+            if polygons_overlap(proposed_poly, other_poly):
                 return False, f"You can't expand this parcel, it would overlap with {other.get('name', 'another parcel')}!"
-                
         # 4. If no overlaps, save the new size!
         db.parcels.update_one(
             {"_id": ObjectId(parcel_id)},

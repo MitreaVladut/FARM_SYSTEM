@@ -226,13 +226,18 @@ class DashboardState(rx.State):
         for y in range(29, -1, -1):
             for x in range(40):
                 is_occupied = False
+                is_editing = False
                 point = {"x": float(x) + 0.49, "y": float(y) + 0.49}
                 for p in self.parcels:
                     poly = get_polygon(p)
                     if is_point_in_polygon(point, poly):
-                        is_occupied = True
+                        # If we are currently editing THIS parcel, mark it yellow
+                        if self.edit_parcel_id and str(p["id"]) == self.edit_parcel_id:
+                            is_editing = True
+                        else:
+                            is_occupied = True
                         break
-                cells.append({"x": x, "y": y, "selected": False, "occupied": is_occupied})
+                cells.append({"x": x, "y": y, "selected": False, "occupied": is_occupied, "editing": is_editing})
         self.grid_cells = cells
 
     def clear_drawing(self):
@@ -282,6 +287,7 @@ class DashboardState(rx.State):
                 w = (max_x - min_x) + 1
                 h = (max_y - min_y) + 1
                 self.parcel_area = str(float(w * h))
+                self.edit_area = self.parcel_area
             else:
                 self.clear_drawing()
                 
@@ -309,6 +315,7 @@ class DashboardState(rx.State):
                 
                 true_area = abs(area) / 2.0 + (boundary_points / 2.0) + 1
                 self.parcel_area = str(round(true_area, 2))
+                self.edit_area = self.parcel_area 
 
                 # 2. Perfect Line Drawing (Bresenham's Algorithm)
                 boundary = set()
@@ -517,6 +524,7 @@ class DashboardState(rx.State):
         self.edit_status = str(p_status) # NEW: Store the status
 
         self.show_edit_modal = True
+        self.clear_drawing()
 
     def save_parcel_edits(self):
         """Calls the DB function to update the parcel, trusting the new polygon geometry."""
@@ -529,7 +537,11 @@ class DashboardState(rx.State):
                 return rx.toast.error("A Planting Date is required when assigning a new crop.")
 
         # FIX: Inflate custom shapes by 0.5 at the max/min boundaries to fully encapsulate the drawn cells
-        raw_coordinates = [{"x": float(c["x"]), "y": float(c["y"])} for c in self.temp_coordinates]
+        if len(self.temp_coordinates) > 0:
+            raw_coordinates = [{"x": float(c["x"]), "y": float(c["y"])} for c in self.temp_coordinates]
+        else:
+            target = next((p for p in self.parcels if str(p["id"]) == self.edit_parcel_id), None)
+            raw_coordinates = target.get("coordinates", []) if target else []
 
         from .db import update_parcel
         
@@ -541,9 +553,10 @@ class DashboardState(rx.State):
             str(self.edit_crop), str(self.edit_date),
             coordinates=raw_coordinates # Pass the clean Python list here!
         )
-        
+            
         if success:
             self.show_edit_modal = False
+            self.edit_parcel_id = ""
             self.load_dashboard_data()
             return rx.toast.success(f"Parcel '{self.edit_name}' updated!")
         
@@ -1088,26 +1101,16 @@ def edit_parcel_dialog():
                     width="100%"
                 ),
                 
-                # Grid Coordinates
-                rx.hstack(
-                    rx.vstack(
-                        rx.text("X", size="1", color="gray"),
-                        rx.input(value=DashboardState.edit_x, on_change=DashboardState.set_edit_x, width="100%"),
-                    ),
-                    rx.vstack(
-                        rx.text("Y", size="1", color="gray"),
-                        rx.input(value=DashboardState.edit_y, on_change=DashboardState.set_edit_y, width="100%"),
-                    ),
-                    rx.vstack(
-                        rx.text("W", size="1", color="gray"),
-                        rx.input(value=DashboardState.edit_width, on_change=DashboardState.set_edit_width, width="100%"),
-                    ),
-                    rx.vstack(
-                        rx.text("H", size="1", color="gray"),
-                        rx.input(value=DashboardState.edit_height, on_change=DashboardState.set_edit_height, width="100%"),
-                    ),
-                    width="100%"
+                rx.divider(margin_y="10px"),
+
+                # --- NEW HELPER MESSAGE & GRID FOR EDITING ---
+                rx.callout(
+                    f"The yellow area is '{DashboardState.edit_name}'. Draw a new shape over it to change its location or boundaries. If left untouched, the original shape will be kept.",
+                    icon="info", color_scheme="yellow", width="100%", margin_bottom="10px"
                 ),
+                
+                interactive_drawing_grid(),
+                # ---------------------------------------------
                 
                 rx.hstack(
                     rx.dialog.close(rx.button("Cancel", variant="soft", color_scheme="gray")),
@@ -1141,7 +1144,10 @@ def interactive_drawing_grid():
                     # NEW: Color it Orange if occupied, Green if selected, White if empty
                     background_color=rx.cond(
                         cell["selected"], "#4ade80", 
-                        rx.cond(cell["occupied"], "#fb923c", "white")
+                        rx.cond(
+                            cell["editing"], "#fde047", # NEW: Yellow if this is the parcel being edited
+                            rx.cond(cell["occupied"], "#fb923c", "white")
+                        )
                     ),
                     border="1px solid #e2e8f0", cursor="crosshair",
                     _hover={"background_color": "#bbf7d0"},
