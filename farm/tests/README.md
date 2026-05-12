@@ -9,21 +9,23 @@ We use **pytest** as the testing framework, which is Python's most popular testi
 ## Running Tests
 
 ```bash
-# Install dependencies
+# Install dependencies (one time)
 pip install -e .
 
 # Run all tests
-pytest
+python -m pytest
 
 # Run specific test file
-pytest tests/test_db.py
+python -m pytest tests/test_db.py
 
 # Run with verbose output
-pytest -v
+python -m pytest -v
 
 # Run tests matching pattern
-pytest -k "test_verify_user"
+python -m pytest -k "test_verify_user"
 ```
+
+**Note:** Use `python -m pytest` instead of `pytest` to ensure proper Python path configuration.
 
 ## Test Categories
 
