@@ -178,12 +178,36 @@ def update_order_status(order_id: str, new_status: str):
 
 # Add this under your other functions in farm/db.py
 def get_all_parcels():
-    """Fetch all parcels for graphical reporting."""
+    """REQ-2.4: Fetch all parcels and auto-update status based on planting date."""
+    import datetime
     db = Database.get_db()
     parcels = list(db.parcels.find())
+    
+    # Gets today's date in 'YYYY-MM-DD' format (reads from your PC clock!)
+    today = datetime.date.today().isoformat() 
+
+    print(f"🕒 [SYSTEM TIME] Python thinks today is: {today}")
+
     for parcel in parcels:
+        parcel_id = parcel["_id"]
+        current_status = str(parcel.get("status", ""))
+        p_date = str(parcel.get("planting_date", "None"))
+
+        # Time-based transitions logic
+        if current_status not in ["Available", "Harvested"] and p_date != "None":
+            # If today is past or equal to planting date -> In Production. Otherwise -> Planned.
+            new_status = "In Production" if today >= p_date else "Planned"
+
+            print(f"📦 Checking '{parcel.get('name')}': Planted {p_date} -> Status: {new_status}")
+            
+            # If the status just shifted, update the database permanently
+            if current_status != new_status:
+                db.parcels.update_one({"_id": parcel_id}, {"$set": {"status": new_status}})
+                parcel["status"] = new_status
+
         parcel["id"] = str(parcel.pop("_id"))
         parcel["active"] = "true" if parcel.get("active", True) else "false"
+        
     return parcels
 
 # --- STAFF MANAGEMENT FUNCTIONS ---
@@ -523,4 +547,15 @@ def toggle_parcel_status(parcel_id: str, new_status: bool) -> bool:
         return True
     except Exception as e:
         print(f"Error toggling parcel: {e}")
+        return False
+    
+def delete_parcel(parcel_id: str) -> bool:
+    """REQ-2.8: Deletes a parcel entirely from the database."""
+    try:
+        from bson.objectid import ObjectId
+        db = Database.get_db()
+        db.parcels.delete_one({"_id": ObjectId(parcel_id)})
+        return True
+    except Exception as e:
+        print(f"Error deleting parcel: {e}")
         return False

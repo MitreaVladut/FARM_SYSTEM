@@ -68,6 +68,28 @@ class DashboardState(rx.State):
     edit_soil_type: str = ""
     edit_irrigation: bool = False
     
+    # Delete Parcel Variables
+    show_delete_parcel_modal: bool = False
+    delete_parcel_id: str = ""
+    delete_parcel_name: str = ""
+    delete_parcel_status: str = ""
+
+    def open_delete_parcel_modal(self, p_id: str, p_name: str, p_status: str):
+        """Triggers the confirmation warning."""
+        self.delete_parcel_id = str(p_id)
+        self.delete_parcel_name = str(p_name)
+        self.delete_parcel_status = str(p_status)
+        self.show_delete_parcel_modal = True
+
+    def confirm_delete_parcel(self):
+        """Executes the permanent deletion."""
+        from .db import delete_parcel
+        success = delete_parcel(self.delete_parcel_id)
+        if success:
+            self.show_delete_parcel_modal = False
+            self.load_dashboard_data() # Refreshes map and table
+            return rx.toast.success(f"Parcel deleted.")
+        return rx.toast.error("Error deleting parcel.")
 
     def load_dashboard_data(self):
         try:
@@ -599,7 +621,10 @@ def parcel_row(parcel: dict):
             # 2. Show "Inactive" (grey) if deactivated, otherwise show normal status (blue)
             rx.badge(
                 rx.cond(is_active, parcel["status"].to(str), "Inactive"), 
-                color_scheme=rx.cond(is_active, "blue", "gray")
+                color_scheme=rx.cond(
+                    ~is_active, "gray", 
+                    rx.cond(parcel["status"] == "In Production", "green", "blue")
+                )
             )
         ),
         rx.table.cell(
@@ -639,8 +664,19 @@ def parcel_row(parcel: dict):
                     on_click=lambda: DashboardState.toggle_parcel(parcel["id"].to(str), parcel["active"].to(str))
                 
                 ),
-                spacing="2"
-            )
+                spacing="2",
+                
+            ),
+            # 4. Add the permanent Delete Button
+                rx.button(
+                    rx.icon("trash-2", size=16), 
+                    size="1", 
+                    color_scheme="red", 
+                    variant="ghost",
+                    on_click=lambda: DashboardState.open_delete_parcel_modal(
+                        parcel["id"].to(str), parcel["name"].to(str), parcel["status"].to(str)
+                    )
+                ),
         ),
         # 4. Dim the entire row visually if deactivated
         opacity=rx.cond(is_active, "1.0", "0.5") 
@@ -700,6 +736,32 @@ def harvest_dialog():
         ), open=DashboardState.show_harvest_modal, on_open_change=DashboardState.set_show_harvest_modal,
     )
 
+def delete_parcel_dialog():
+    return rx.dialog.root(
+        rx.dialog.content(
+            rx.vstack(
+                rx.dialog.title("Delete Parcel", color="red"),
+                rx.text("Are you sure you want to permanently delete '", DashboardState.delete_parcel_name, "'?", size="3"),
+                
+                # REQ-2.8: Critical Warning for active production
+                rx.cond(
+                    DashboardState.delete_parcel_status == "In Production",
+                    rx.callout(
+                        "⚠️ WARNING: This parcel is currently IN PRODUCTION. Deleting it will result in a total loss of the expected yield. Please confirm.",
+                        icon="alert-triangle", color_scheme="red", width="100%", margin_y="10px"
+                    )
+                ),
+                
+                rx.hstack(
+                    rx.dialog.close(rx.button("Cancel", variant="soft", color_scheme="gray")),
+                    rx.button("Confirm Delete", on_click=DashboardState.confirm_delete_parcel, color_scheme="red"),
+                    spacing="3", margin_top="15px", justify="end", width="100%"
+                ),
+            ), max_width="400px",
+        ), open=DashboardState.show_delete_parcel_modal, on_open_change=DashboardState.set_show_delete_parcel_modal,
+    )
+
+
 @require_admin_only
 def dashboard_page():
     return rx.box(
@@ -709,6 +771,7 @@ def dashboard_page():
         add_parcel_dialog(),
         harvest_dialog(),
         edit_parcel_dialog(),
+        delete_parcel_dialog(),
 
         rx.hstack(
             rx.hstack(
