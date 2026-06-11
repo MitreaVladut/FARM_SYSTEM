@@ -40,8 +40,9 @@ The system features a custom-built interactive grid that allows administrators t
    git clone [https://github.com/YOUR_USERNAME/FARM_SYSTEM.git](https://github.com/YOUR_USERNAME/FARM_SYSTEM.git)
    cd FARM_SYSTEM
 
+---
 
-## Contributors
+## 👥 Contributors
 # This project was developed by a team of three:
 
 * Mitrea Vladut-Cristian
